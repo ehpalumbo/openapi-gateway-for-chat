@@ -32,7 +32,12 @@ src/
 │   └── secrets.ts          # TokenStore over SecretStorage (R-AUTH-2)
 ├── vscode/                 # Thin VS Code adapters
 │   ├── http.ts             # fetchWithLimit — size-limited fetching (NFR-2)
-│   ├── commands.ts         # register/unregister/refresh commands (R-REG-1..3, 6, 8, 9)
+│   ├── commands/           # one module per command; index wires IDs
+│   │   ├── common.ts       # CommandContext, spec loading/parsing, suggestion helpers (R-REG-*)
+│   │   ├── register.ts     # register-from-url / register-from-file handlers (R-REG-1..2, 8, 9)
+│   │   ├── unregister.ts   # unregister handler (R-REG-3)
+│   │   ├── refresh.ts      # refresh logic shared with activation (R-REG-6, 7)
+│   │   └── index.ts        # binds handlers to vscode.commands IDs (R-REG-1..3, 6)
 │   └── tools.ts            # vscode.lm.registerTool wiring + prepareInvocation safety (R-SAFE-*)
 └── extension.ts            # Activation: refresh specs, (re)register tools + commands
 ```

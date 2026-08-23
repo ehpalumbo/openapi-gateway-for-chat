@@ -130,11 +130,14 @@ export function buildOperations(document: OpenApiDocument): OperationInfo[] {
  * groups sorted alphabetically, each group carrying its document-level tag
  * description when available (R-DISC-2, R-GRP-*).
  *
- * @param document - The parsed spec providing `tags[].description` metadata.
- * @param operations - Operations produced by {@link buildOperations} for the same document.
+ * Identity rules (R-ID-1..4) are applied by {@link buildOperations}, which is
+ * invoked internally; callers never handle the flat operation list.
+ *
+ * @param document - A parsed, validated OpenAPI document.
  * @returns The grouped model; the single source of truth stored in a snapshot.
  */
-export function buildApiModel(document: OpenApiDocument, operations: OperationInfo[]): ApiModel {
+export function buildApiModel(document: OpenApiDocument): ApiModel {
+	const operations = buildOperations(document);
 	const byName = new Map<string, OperationInfo[]>();
 	for (const op of operations) {
 		const list = byName.get(op.group);

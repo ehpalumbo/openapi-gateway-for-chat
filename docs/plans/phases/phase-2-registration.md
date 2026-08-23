@@ -45,17 +45,20 @@ This phase makes APIs registrable and durable: a size-limited HTTP fetcher, the 
 
 - **Prerequisites / Dependencies:** Tasks 1–3.
 - **Affected Files:**
-  - [commands.ts](../../src/vscode/commands.ts) (new)
-- **Affected Symbols:** `registerApiCommands(ctx: { registry: ApiRegistry; tokens: TokenStore; onChange: () => void })`, handlers for IDs below
+  - [commands/common.ts](../../src/vscode/commands/common.ts) (new) — shared `CommandContext`, spec loading/parsing helpers, pure suggestion helpers
+  - [commands/register.ts](../../src/vscode/commands/register.ts), [commands/unregister.ts](../../src/vscode/commands/unregister.ts), [commands/refresh.ts](../../src/vscode/commands/refresh.ts) (new) — one module per command exporting a plain handler `(ctx: CommandContext) => …`
+  - [commands/index.ts](../../src/vscode/commands/index.ts) (new) — the only place binding handlers to VS Code command IDs via `vscode.commands.registerCommand`
+- **Affected Symbols:** `registerApiCommands(ctx: { registry: ApiRegistry; tokens: TokenStore; onChange: () => void })` in `index.ts`; per-module handlers `registerFromUrlHandler`, `registerFromFileHandler`, `unregisterApiHandler`, `refreshApisHandler`; test-facing helpers in `common.ts` (`buildSnapshot`, `createRegistration`, `loadSpecFromSource`, `resolveBaseUrlSuggestion`) and `refreshAll` in `refresh.ts`
 - **Description:** Four commands:
-  - `openapi-gateway-for-chat.registerFromUrl` (R-REG-1): URL input box → `fetchWithLimit` → `parseSpec` → prompt unique `apiId` (prefill from title slug; re-prompt on conflict) → if multiple `servers`, QuickPick one (R-REG-9) → optional password InputBox for Bearer token → `tokens.setToken` if provided → `upsert`.
+  - `openapi-gateway-for-chat.registerFromUrl` (R-REG-1): URL input box → `fetchWithLimit` → `parseSpec` → prompt unique `apiId` (prefill from title slug; re-prompt on conflict) → confirm base URL: QuickPick when multiple `servers`, then an always-shown editable InputBox pre-filled with the suggestion so placeholder URIs can be overridden (R-REG-9) → optional password InputBox for Bearer token → `tokens.setToken` if provided → `upsert`.
   - `openapi-gateway-for-chat.registerFromFile` (R-REG-2): `showOpenDialog` filtered to `.json` → read file → same flow as above minus fetch.
   - `openapi-gateway-for-chat.unregisterApi` (R-REG-3): QuickPick of registered APIs → confirm → `remove` + `deleteToken`.
   - `openapi-gateway-for-chat.refreshApis` (R-REG-6): re-fetch each URL registration / re-read each file registration sequentially; on failure keep snapshot, collect errors, surface once via `showWarningMessage` without blocking other registrations (R-REG-7).
+  Command handlers are pure context-consuming functions (no `vscode.commands` calls in their modules) so integration tests can invoke them directly; `index.ts` performs all registration wiring.
   All handlers invoke `onChange()` after mutation so tools re-register later. Reject YAML files with the actionable JSON-only message.
 - **Acceptance Criteria:**
   - [ ] Registering the same `apiId` twice prompts instead of silently overwriting (R-REG-8).
-  - [ ] A multi-server spec shows a selection picker; chosen URL becomes `baseUrl`.
+  - [ ] A multi-server spec shows a selection picker; a single-server spec still shows a pre-filled confirmation prompt; the confirmed value becomes `baseUrl`.
   - [ ] Refresh with an unreachable URL keeps the old snapshot usable and reports the failure; other APIs still refresh.
   - [ ] Token entry uses `password: true` input and lands only in `SecretStorage`.
 

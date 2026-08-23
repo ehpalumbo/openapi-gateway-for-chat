@@ -14,8 +14,33 @@
   "contributes": {
     "commands": [
       {
-        "command": "openapi-gateway-for-chat.helloWorld",
-        "title": "Hello World"
+        "command": "openapi-gateway-for-chat.registerFromUrl",
+        "title": "OpenAPI Gateway: Register API from URL"
+      },
+      {
+        "command": "openapi-gateway-for-chat.registerFromFile",
+        "title": "OpenAPI Gateway: Register API from File"
+      },
+      {
+        "command": "openapi-gateway-for-chat.unregisterApi",
+        "title": "OpenAPI Gateway: Unregister API"
+      },
+      {
+        "command": "openapi-gateway-for-chat.refreshApis",
+        "title": "OpenAPI Gateway: Refresh APIs"
+      }
+    ],
+    "configuration": [
+      {
+        "title": "OpenAPI Gateway",
+        "properties": {
+          "openapiGateway.inlineResponseThreshold": {
+            "type": "number",
+            "default": 8192,
+            "scope": "application",
+            "description": "Maximum response size in bytes to inline into tool results; larger responses spill to a temp file."
+          }
+        }
       }
     ]
   },

@@ -61,7 +61,7 @@ The extension is therefore a **convenience layer**: no external processes, no ex
 | R-REG-6 | Remote specs are re-fetched on extension activation and via a manual "refresh" command. Local-file specs are re-read from disk on activation/refresh. |
 | R-REG-7 | If a spec fails to parse or fetch at refresh time, existing registrations remain usable from the last good snapshot and the failure is surfaced to the user without blocking other registrations. |
 | R-REG-8 | Registration requires a unique, user-visible API identifier (`apiId`); conflicts are rejected and resolved by prompting the user. |
-| R-REG-9 | Registration requires a user-provided default server/base URL for the API; this will be used to invoke the API later. If the spec declares multiple servers, the user selects one at registration time. |
+| R-REG-9 | Registration requires a user-confirmed default server/base URL for the API; this will be used to invoke the API later. The extension always prompts the user to confirm or override the base URL at registration time, pre-filled from the spec's declared server(s); specs carrying placeholder URIs can thus be corrected without re-registration. |
 
 ### 3.2 Authentication
 
@@ -185,7 +185,7 @@ Reference input schemas (informative; normative shape defined by implementation)
 Resolved decisions (2026-08-23):
 
 1. **Inline-response size threshold:** default 8 KB, configurable via `openapiGateway.inlineResponseThreshold`.
-2. **Multiple `servers`:** the user selects a single base URL at registration time (R-REG-9); `invoke_operation` uses only that registered base URL. No server selection at invocation time in MVP.
+2. **Multiple `servers`:** the user confirms a single base URL at registration time (R-REG-9): when several servers are declared a QuickPick selects one, then an editable confirmation prompt (always shown) lets the user override the value; `invoke_operation` uses only that registered base URL. No server selection at invocation time in MVP.
 3. **"Always allow" grants:** feature deferred entirely post-MVP (see Non-Goals); stale-grant semantics become moot until grants are introduced.
 
 Open questions:

@@ -1,26 +1,36 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import { CommandContext, refreshAll, registerApiCommands } from './vscode/commands/index';
+import { ApiRegistry } from './store/registry';
+import { TokenStore } from './store/secrets';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
-
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "openapi-gateway-for-chat" is now active!');
-
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('openapi-gateway-for-chat.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from OpenAPI Gateway for Chat!');
-	});
-
-	context.subscriptions.push(disposable);
+/**
+ * Registers the gateway language-model tools.
+ *
+ * Stubbed until Phase 3 lands; returns the disposables owning the tools so
+ * this phase compiles and runs standalone.
+ */
+function registerGatewayTools(_ctx: CommandContext): vscode.Disposable[] {
+	return [];
 }
 
-// This method is called when your extension is deactivated
+export function activate(context: vscode.ExtensionContext) {
+	const registry = new ApiRegistry(context.globalState);
+	const tokens = new TokenStore(context.secrets);
+	const ctx: CommandContext = {
+		registry,
+		tokens,
+		onChange: () => {
+			// Tools re-register on every registry change (Phase 3).
+		},
+	};
+
+	context.subscriptions.push(...registerApiCommands(ctx), ...registerGatewayTools(ctx));
+
+	void refreshAll(ctx).catch((err: unknown) => {
+		void vscode.window.showErrorMessage(
+			`OpenAPI Gateway: initial refresh failed: ${err instanceof Error ? err.message : String(err)}`
+		);
+	});
+}
+
 export function deactivate() {}

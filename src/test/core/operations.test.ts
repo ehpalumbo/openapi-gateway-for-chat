@@ -87,7 +87,7 @@ suite('core/operations', () => {
 				'/pets': { get: { tags: ['pets', 'public'] } },
 				'/stores': { post: { tags: ['stores'] } },
 			});
-			const model = buildApiModel(document, buildOperations(document));
+			const model = buildApiModel(document);
 			assert.deepStrictEqual(
 				model.groups.map((g) => ({ name: g.name, count: g.operations.length })),
 				[
@@ -107,7 +107,7 @@ suite('core/operations', () => {
 				{ name: 'alpha', description: 'Alpha operations' },
 				{ name: 'bravo', description: 'Bravo operations' },
 			];
-			const model = buildApiModel(document, buildOperations(document));
+			const model = buildApiModel(document);
 			assert.deepStrictEqual(
 				model.groups.map((g) => ({ name: g.name, description: g.description })),
 				[
@@ -123,7 +123,7 @@ suite('core/operations', () => {
 				'/pets/{petId}': { get: { tags: ['pets'] } },
 				'/ping': { get: {} },
 			});
-			const model = buildApiModel(document, buildOperations(document));
+			const model = buildApiModel(document);
 			const index = buildOperationIndex(model);
 			assert.strictEqual(index.size, model.groups.reduce((n, g) => n + g.operations.length, 0));
 			for (const group of model.groups) {
@@ -140,7 +140,7 @@ suite('core/operations', () => {
 				'/pets': { get: { tags: ['pets'] }, post: { tags: ['pets'] } },
 				'/stores': { post: { tags: ['stores'] } },
 			});
-			const model = buildApiModel(document, buildOperations(document));
+			const model = buildApiModel(document);
 
 			const both = operationsInGroups(model, ['pets', 'stores']);
 			assert.strictEqual(both.found.length, 3);
@@ -192,7 +192,7 @@ suite('core/operations', () => {
 			const document = docWith({
 				'/pets': { get: { tags: ['pets'] } },
 			});
-			const index = buildOperationIndex(buildApiModel(document, buildOperations(document)));
+			const index = buildOperationIndex(buildApiModel(document));
 			assert.ok(index.get('pets-get-pets'));
 			assert.strictEqual(findOperation(index, 'pets-get-pets'), index.get('pets-get-pets'));
 			assert.strictEqual(findOperation(index, 'nope'), undefined);
