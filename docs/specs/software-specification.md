@@ -35,11 +35,12 @@ The extension is therefore a **convenience layer**: no external processes, no ex
 - Register/unregister APIs from OpenAPI 3.0.x and 3.1 documents.
 - Register language model tools for progressive API discovery and invocation.
 - Static Bearer-token authentication.
-- Safe-by-default invocation of non-idempotent operations via user confirmation.
+- Safe-by-default invocation of non-idempotent operations via the platform's native tool-confirmation flow.
 - Size-aware response handling so large payloads do not flood model context.
 
 ### Non-Goals (explicitly out of MVP scope)
 
+- **"Always allow this operation" grants and their revocation** (originally R-SAFE-4): deferred post-MVP. Every non-safe invocation requires user confirmation in the chat UI; no approval persistence is implemented in this release.
 - Management UI beyond commands (no dedicated views, diagnostics panels, or request-history log).
 - OAuth2/OIDC or any auth scheme other than static Bearer tokens.
 - Swagger 2.0 support.
@@ -55,7 +56,7 @@ The extension is therefore a **convenience layer**: no external processes, no ex
 | R-REG-1 | The extension contributes a command to register an API from an `http`/`https` URL pointing to an OpenAPI document. |
 | R-REG-2 | The extension contributes a command to register an API from an OpenAPI document in the current workspace (file picker). |
 | R-REG-3 | The extension contributes a command to unregister a previously registered API. |
-| R-REG-4 | Supported specification versions: OpenAPI **3.0.x** and **3.1.x**. Other versions are rejected with a clear, actionable error message. |
+| R-REG-4 | Supported specification versions: OpenAPI **3.0.x** and **3.1.x**, in **JSON format only** (YAML documents are rejected with a clear, actionable error message). Other versions are rejected likewise. |
 | R-REG-5 | Registrations persist at **user-global scope** (`globalState`) and survive window reloads; they apply to all workspaces. |
 | R-REG-6 | Remote specs are re-fetched on extension activation and via a manual "refresh" command. Local-file specs are re-read from disk on activation/refresh. |
 | R-REG-7 | If a spec fails to parse or fetch at refresh time, existing registrations remain usable from the last good snapshot and the failure is surfaced to the user without blocking other registrations. |
@@ -118,18 +119,19 @@ Flow: **`list_apis` → `describe_api` → `list_operations` → `describe_opera
 
 ### 3.7 Safety: Destructive Call Confirmation
 
+Confirmation is implemented via the Language Model Tools API's native mechanism: `prepareInvocation` returning `confirmationMessages`. The host (Copilot Chat) renders the confirmation inline in the chat UI with its own **Continue** / **Cancel** buttons; the extension does not build custom modals. Note that the exact button set is controlled by the host and is not customizable.
+
 | ID | Requirement |
 | ---- | ------------- |
-| R-SAFE-1 | Safe methods (`GET`, `HEAD`) execute without confirmation. |
-| R-SAFE-2 | Non-safe methods (`POST`, `PUT`, `PATCH`, `DELETE`, and any others) require explicit user approval before each call. |
-| R-SAFE-3 | Approval uses a rich modal showing method, resolved URL, headers, and body preview, with three options: **Allow once**, **Always allow this operation**, **Deny**. |
-| R-SAFE-4 | "Always allow" grants persist per user and per operation ID; users can revoke grants via a command. |
+| R-SAFE-1 | Safe methods (`GET`, `HEAD`) execute without confirmation: `prepareInvocation` returns no `confirmationMessages` for `invoke_operation` calls resolving to safe methods. |
+| R-SAFE-2 | Non-safe methods (`POST`, `PUT`, `PATCH`, `DELETE`, and any others) require user approval before each call: `prepareInvocation` returns `confirmationMessages` for such calls, causing the host to prompt before every invocation. |
+| R-SAFE-3 | The confirmation message content is rich and model/user-readable: HTTP method, resolved URL, headers to be sent (with the Authorization header redacted), and a body preview. |
 
 ### 3.8 Response Handling
 
 | ID | Requirement |
 | ---- | ------------- |
-| R-RESP-1 | Responses below a configurable size threshold are inlined in the tool result; including status code and headers. |
+| R-RESP-1 | Responses below a configurable size threshold (setting `openapiGateway.inlineResponseThreshold`, default **8 KB**) are inlined in the tool result; including status code and headers. |
 | R-RESP-2 | Responses above the threshold are written to a temporary file; the tool result returns the file path/link plus metadata: status line, headers, and body byte size — letting the agent decide how to process the payload (e.g., open, grep, jq, etc.). |
 | R-RESP-3 | Binary responses are detected via content type and never inlined into tool results; they follow the temp-file path of R-RESP-2. |
 
@@ -137,7 +139,7 @@ Flow: **`list_apis` → `describe_api` → `list_operations` → `describe_opera
 
 All five tools share conventions:
 
-- Names use the `` prefix and snake_case (valid for `vscode.lm` tool name constraints).
+- Names use the `gateway_` prefix and snake_case (valid for `vscode.lm` tool name constraints): `gateway_list_apis`, `gateway_describe_api`, `gateway_list_operations`, `gateway_describe_operation`, `gateway_invoke_operation`.
 - Inputs and outputs are JSON objects; outputs include a stable shape with `content` payloads designed for LLM consumption (concise summaries + structured fields).
 - Unknown `apiId` / `operationId` / group values produce error results naming valid alternatives where feasible (e.g., available groups on unknown-group error).
 
@@ -178,8 +180,14 @@ Reference input schemas (informative; normative shape defined by implementation)
 | NFR-5 | Implementation builds on the existing TypeScript + esbuild extension scaffold and packages with `vsce`. |
 | NFR-6 | Core logic (ID derivation, grouping, schema resolution, request building) is unit-testable independent of the VS Code API; integration tests use `@vscode/test-cli`. |
 
-## 6. Open Questions
+## 6. Resolved and Open Questions
 
-1. Default value for the inline-response size threshold (candidate: 16 KB).
-2. Handling of specs with multiple `servers`: pick first, or expose server selection in `invoke_operation`?
-3. Deprecation/re-registration semantics when a refreshed spec changes operation IDs (breaks "Always allow" grants keyed by operation ID).
+Resolved decisions (2026-08-23):
+
+1. **Inline-response size threshold:** default 8 KB, configurable via `openapiGateway.inlineResponseThreshold`.
+2. **Multiple `servers`:** the user selects a single base URL at registration time (R-REG-9); `invoke_operation` uses only that registered base URL. No server selection at invocation time in MVP.
+3. **"Always allow" grants:** feature deferred entirely post-MVP (see Non-Goals); stale-grant semantics become moot until grants are introduced.
+
+Open questions:
+
+- None currently.
