@@ -24,11 +24,11 @@ This phase exposes registered APIs to language models: the `$ref` schema resolve
 - **Affected Files:**
   - [describe.ts](../../src/core/describe.ts) (new)
 - **Affected Symbols:** `buildListApis(registrations)`, `buildDescribeApi(api)`, `buildListOperations(api, groups: string[])`, `buildDescribeOperation(api, operationId)`
-- **Description:** Pure functions returning JSON-serializable objects for LLM consumption:
+- **Description:** Pure functions returning JSON-serializable objects for LLM consumption, reading from the nested `ApiModel` (see phase 1 refinement):
   - `list_apis`: `{ apiId, title, version, description? }[]`.
-  - `describe_api`: metadata + `{ name, operationCount, description? }[]` groups (R-DISC-2).
-  - `list_operations`: for requested groups → `{ operationId, group, method, path, requiredParams[], summary? }`; unknown group yields error object listing available groups (spec §4).
-  - `describe_operation`: parameter definitions from path variables/query/header params, request-body content schemas resolved via Task 1, response schemas keyed by status code — fully self-contained (R-SCH-2). Unknown `operationId` errors with valid IDs of the same API where feasible.
+  - `describe_api`: metadata + `{ name, description?, operationCount }[]` groups straight from `model.groups` (R-DISC-2).
+  - `list_operations`: uses `operationsInGroups(model, groups)` → operations of known groups; unknown names yield an error object listing available group names from the model (spec §4).
+  - `describe_operation`: resolves via the API's operation index; parameter definitions from path/query/header params, request-body content schemas resolved via Task 1, response schemas keyed by status code — fully self-contained (R-SCH-2). Unknown `operationId` errors with valid IDs of the same API where feasible.
 - **Acceptance Criteria:**
   - [ ] Each builder output is plain JSON (survives `JSON.stringify(JSON.parse(...))` round-trip).
   - [ ] `describe_operation` contains no reference to `components.schemas` outside its own closure.

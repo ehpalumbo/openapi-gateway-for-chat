@@ -23,10 +23,11 @@ This phase makes APIs registrable and durable: a size-limited HTTP fetcher, the 
 - **Prerequisites / Dependencies:** Task 1 of Phase 1 (types).
 - **Affected Files:**
   - [registry.ts](../../src/store/registry.ts) (new)
-- **Affected Symbols:** `ApiRegistry` (`load`, `save`, `upsert`, `remove`, `list`, `get`, `has`)
-- **Description:** Wrap a `vscode.Memento` (passed in as `vscode.Memento`, stored under key `registeredApis`). Keep registrations as `ApiRegistration[]`; `snapshot` holds the last successfully parsed spec so failures at refresh time never destroy usability (R-REG-7). `upsert` rejects duplicate `apiId` by returning a typed conflict result the caller resolves by prompting (R-REG-8).
+- **Affected Symbols:** `ApiRegistry` (`load`, `save`, `upsert`, `remove`, `list`, `get`, `has`), runtime view `{ registration, model, index }`
+- **Description:** Wrap a `vscode.Memento` (passed in as `vscode.Memento`, stored under key `registeredApis`). Keep registrations as `ApiRegistration[]`; `snapshot.model` holds the last successfully parsed, grouped API model so failures at refresh time never destroy usability (R-REG-7). Maintain an in-memory per-API runtime view — `Map<apiId, { registration, model, index }>` where `index = buildOperationIndex(model)` (see phase 1 refinement) — rebuilt on every mutation (`upsert`, `remove`, refresh) so the derived index can never drift from the persisted model. Operation IDs are unique within an API only; never flatten indices across APIs. `upsert` rejects duplicate `apiId` by returning a typed conflict result the caller resolves by prompting (R-REG-8).
 - **Acceptance Criteria:**
   - [ ] Two `ApiRegistry` instances over the same memento see the same data (persistence semantics testable without window reload).
+  - [ ] After any mutation, the in-memory index resolves exactly the operations present in `snapshot.model` (no drift).
   - [ ] `upsert` with existing `apiId` returns conflict and does not mutate state.
 
 ### 3. Implement the token secret store

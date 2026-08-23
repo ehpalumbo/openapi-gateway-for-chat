@@ -4,7 +4,7 @@
  * All functions are pure and deterministic: the same document always yields
  * the same operation IDs and groups, across activations and refreshes.
  */
-import { HTTP_METHODS, HttpMethod, OpenApiDocument, OpenApiOperation, OpenApiParameter, OperationGroup, OperationInfo, OperationParameter } from './types';
+import { HTTP_METHODS, ApiModel, HttpMethod, OpenApiDocument, OpenApiOperation, OpenApiParameter, OperationGroupModel, OperationInfo, OperationParameter } from './types';
 
 /** Group assigned to operations that declare no tags. */
 const DEFAULT_GROUP = 'default';
@@ -126,29 +126,83 @@ export function buildOperations(document: OpenApiDocument): OperationInfo[] {
 }
 
 /**
- * Aggregates operations into named groups sorted alphabetically, as exposed by
- * `gateway_describe_api` (R-GRP-2).
+ * Builds the grouped {@link ApiModel} for one API: operations nested into
+ * groups sorted alphabetically, each group carrying its document-level tag
+ * description when available (R-DISC-2, R-GRP-*).
  *
- * @param operations - Operations produced by {@link buildOperations}.
- * @returns One entry per distinct group name with its operation count.
+ * @param document - The parsed spec providing `tags[].description` metadata.
+ * @param operations - Operations produced by {@link buildOperations} for the same document.
+ * @returns The grouped model; the single source of truth stored in a snapshot.
  */
-export function groupOperations(operations: OperationInfo[]): OperationGroup[] {
-	const counts = new Map<string, number>();
+export function buildApiModel(document: OpenApiDocument, operations: OperationInfo[]): ApiModel {
+	const byName = new Map<string, OperationInfo[]>();
 	for (const op of operations) {
-		counts.set(op.group, (counts.get(op.group) ?? 0) + 1);
+		const list = byName.get(op.group);
+		if (list) {
+			list.push(op);
+		} else {
+			byName.set(op.group, [op]);
+		}
 	}
-	return [...counts.entries()]
+	const groups: OperationGroupModel[] = [...byName.entries()]
 		.sort(([a], [b]) => a.localeCompare(b))
-		.map(([name, operationCount]) => ({ name, operationCount }));
+		.map(([name, groupOps]) => {
+			const description = document.tags?.find((tag) => tag.name === name)?.description;
+			return { name, description, operations: groupOps };
+		});
+	return { groups };
 }
 
 /**
- * Looks up an operation by its unique ID within one API.
+ * Builds an in-memory index mapping operation ID to operation for one API.
  *
- * @param operations - Operations to search.
+ * Derived from the model at load/refresh time (never persisted), so it cannot
+ * drift from the grouped structure. Operation IDs are unique within an API but
+ * not across APIs — callers must keep one index per registered API.
+ *
+ * @param model - Grouped model to flatten.
+ * @returns A map usable for O(1) lookups in invocation flows.
+ */
+export function buildOperationIndex(model: ApiModel): Map<string, OperationInfo> {
+	const index = new Map<string, OperationInfo>();
+	for (const group of model.groups) {
+		for (const op of group.operations) {
+			index.set(op.operationId, op);
+		}
+	}
+	return index;
+}
+
+/**
+ * Resolves a requested set of group names against a model.
+ *
+ * @param model - Grouped model to search.
+ * @param names - One or more requested group names.
+ * @returns `found` operations grouped in the order the known names were
+ *          requested, and `unknown` listing names with no matching group so
+ *          callers can report valid alternatives (spec §4).
+ */
+export function operationsInGroups(model: ApiModel, names: string[]): { found: OperationInfo[]; unknown: string[] } {
+	const found: OperationInfo[] = [];
+	const unknown: string[] = [];
+	for (const name of names) {
+		const group = model.groups.find((g) => g.name === name);
+		if (group) {
+			found.push(...group.operations);
+		} else {
+			unknown.push(name);
+		}
+	}
+	return { found, unknown };
+}
+
+/**
+ * Looks up an operation by its unique ID within one API's index.
+ *
+ * @param index - Index built by {@link buildOperationIndex} for that API.
  * @param operationId - ID as exposed by the discovery tools.
  * @returns The matching operation, or `undefined` when the ID is unknown.
  */
-export function findOperation(operations: OperationInfo[], operationId: string): OperationInfo | undefined {
-	return operations.find((op) => op.operationId === operationId);
+export function findOperation(index: Map<string, OperationInfo>, operationId: string): OperationInfo | undefined {
+	return index.get(operationId);
 }

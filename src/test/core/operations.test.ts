@@ -7,7 +7,7 @@
  */
 import * as assert from 'assert';
 import { OpenApiDocument } from '../../core/types';
-import { buildOperations, deriveOperationId, findOperation, groupOperations } from '../../core/operations';
+import { buildApiModel, buildOperationIndex, buildOperations, deriveOperationId, findOperation, operationsInGroups } from '../../core/operations';
 
 suite('core/operations', () => {
 	suite('deriveOperationId', () => {
@@ -83,16 +83,72 @@ suite('core/operations', () => {
 		});
 
 		test('groups reflect the first declared tag only', () => {
-			const ops = buildOperations(
-				docWith({
-					'/pets': { get: { tags: ['pets', 'public'] } },
-					'/stores': { post: { tags: ['stores'] } },
-				})
+			const document = docWith({
+				'/pets': { get: { tags: ['pets', 'public'] } },
+				'/stores': { post: { tags: ['stores'] } },
+			});
+			const model = buildApiModel(document, buildOperations(document));
+			assert.deepStrictEqual(
+				model.groups.map((g) => ({ name: g.name, count: g.operations.length })),
+				[
+					{ name: 'pets', count: 1 },
+					{ name: 'stores', count: 1 },
+				]
 			);
-			assert.deepStrictEqual(groupOperations(ops), [
-				{ name: 'pets', operationCount: 1 },
-				{ name: 'stores', operationCount: 1 },
-			]);
+			assert.strictEqual(model.groups[0].operations[0].group, 'pets');
+		});
+
+		test('buildApiModel sorts groups alphabetically and propagates tag descriptions (R-DISC-2)', () => {
+			const document = docWith({
+				'/b': { get: { tags: ['bravo'] } },
+				'/a': { get: { tags: ['alpha'] } },
+			});
+			document.tags = [
+				{ name: 'alpha', description: 'Alpha operations' },
+				{ name: 'bravo', description: 'Bravo operations' },
+			];
+			const model = buildApiModel(document, buildOperations(document));
+			assert.deepStrictEqual(
+				model.groups.map((g) => ({ name: g.name, description: g.description })),
+				[
+					{ name: 'alpha', description: 'Alpha operations' },
+					{ name: 'bravo', description: 'Bravo operations' },
+				]
+			);
+		});
+
+		test('buildOperationIndex flattens the model without drift', () => {
+			const document = docWith({
+				'/pets': { get: { tags: ['pets'] } },
+				'/pets/{petId}': { get: { tags: ['pets'] } },
+				'/ping': { get: {} },
+			});
+			const model = buildApiModel(document, buildOperations(document));
+			const index = buildOperationIndex(model);
+			assert.strictEqual(index.size, model.groups.reduce((n, g) => n + g.operations.length, 0));
+			for (const group of model.groups) {
+				for (const op of group.operations) {
+					assert.strictEqual(index.get(op.operationId), op);
+				}
+			}
+			assert.strictEqual(index.get('pets-get-pets')?.group, 'pets');
+			assert.strictEqual(index.get('default-get-ping')?.group, 'default');
+		});
+
+		test('operationsInGroups returns found operations and unknown names', () => {
+			const document = docWith({
+				'/pets': { get: { tags: ['pets'] }, post: { tags: ['pets'] } },
+				'/stores': { post: { tags: ['stores'] } },
+			});
+			const model = buildApiModel(document, buildOperations(document));
+
+			const both = operationsInGroups(model, ['pets', 'stores']);
+			assert.strictEqual(both.found.length, 3);
+			assert.deepStrictEqual(both.unknown, []);
+
+			const partial = operationsInGroups(model, ['stores', 'nope']);
+			assert.strictEqual(partial.found.length, 1);
+			assert.deepStrictEqual(partial.unknown, ['nope']);
 		});
 
 		test('merges path-item-level and operation-level parameters with path params required', () => {
@@ -133,13 +189,13 @@ suite('core/operations', () => {
 		});
 
 		test('findOperation resolves by id', () => {
-			const ops = buildOperations(
-				docWith({
-					'/pets': { get: { tags: ['pets'] } },
-				})
-			);
-			assert.strictEqual(findOperation(ops, 'pets-get-pets'), ops[0]);
-			assert.strictEqual(findOperation(ops, 'nope'), undefined);
+			const document = docWith({
+				'/pets': { get: { tags: ['pets'] } },
+			});
+			const index = buildOperationIndex(buildApiModel(document, buildOperations(document)));
+			assert.ok(index.get('pets-get-pets'));
+			assert.strictEqual(findOperation(index, 'pets-get-pets'), index.get('pets-get-pets'));
+			assert.strictEqual(findOperation(index, 'nope'), undefined);
 		});
 	});
 });

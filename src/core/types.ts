@@ -197,13 +197,25 @@ export interface OperationInfo {
 }
 
 /**
- * A named group of operations, as exposed by `gateway_describe_api`.
+ * A named group of operations with its operations nested inside, as exposed by
+ * `gateway_describe_api` and consumed by `gateway_list_operations`.
  */
-export interface OperationGroup {
+export interface OperationGroupModel {
 	/** Group name: first tag or `default`. */
 	name: string;
-	/** Number of operations in the group. */
-	operationCount: number;
+	/** Brief description from the document's `tags[].description`, when available (R-DISC-2). */
+	description?: string;
+	/** Operations belonging to the group. */
+	operations: OperationInfo[];
+}
+
+/**
+ * The grouped operation structure of one API: the single source of truth for
+ * discovery tools, from which the in-memory operation index is derived.
+ */
+export interface ApiModel {
+	/** Groups sorted alphabetically by name. */
+	groups: OperationGroupModel[];
 }
 
 /**
@@ -213,10 +225,8 @@ export interface OperationGroup {
 export interface ApiSnapshot {
 	/** Parsed document backing the snapshot. */
 	document: OpenApiDocument;
-	/** Derived operations of {@link document}. */
-	operations: OperationInfo[];
-	/** Groups derived from {@link operations}. */
-	groups: OperationGroup[];
+	/** Grouped operation model derived from {@link document}. */
+	model: ApiModel;
 }
 
 /**

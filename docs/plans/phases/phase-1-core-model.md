@@ -2,7 +2,9 @@
 
 ## Overview
 
-This phase builds the pure-logic foundation every later phase consumes: the domain types, OpenAPI JSON parsing/validation, deterministic operation-ID derivation (R-ID-1..4), and first-tag grouping (R-GRP-1). No `vscode` imports here, so all of it is unit-testable immediately. Later phases wrap this core with VS Code adapters.
+This phase builds the pure-logic foundation every later phase consumes: the domain types, OpenAPI JSON parsing/validation, deterministic operation-ID derivation (R-ID-1..4), and a nested, grouped API model (R-GRP-1). No `vscode` imports here, so all of it is unit-testable immediately. Later phases wrap this core with VS Code adapters.
+
+> **Refinement (agreed 2026-08-23):** instead of a flat operation list plus separate group summaries, `ApiSnapshot` holds a nested `ApiModel` — groups carry their operations (`OperationGroupModel { name, description?, operations[] }`), with tag descriptions propagated from `document.tags`. An in-memory `Map<operationId, OperationInfo>` index is derived from the model at load/refresh time via `buildOperationIndex`; it is never persisted, keeping one source of truth. The registry keeps one index per `apiId` because IDs are unique within an API only.
 
 ## Task Details
 
@@ -11,7 +13,7 @@ This phase builds the pure-logic foundation every later phase consumes: the doma
 - **Prerequisites / Dependencies:** None.
 - **Affected Files:**
   - [types.ts](../../src/core/types.ts) (new)
-- **Affected Symbols:** `OpenApiDocument`, `ApiOperation`, `ApiRegistration`, `OperationInfo`, `OperationGroup`, `OperationParameter`
+- **Affected Symbols:** `OpenApiDocument`, `ApiOperation`, `ApiRegistration`, `OperationInfo`, `OperationGroupModel`, `ApiModel`, `OperationParameter`
 - **Description:** Model only what the tools need from an OpenAPI document: info block, servers, path-item operations (`operationId`, tags, method, path, parameters, requestBody, responses), and `components.schemas` for `$ref` lookup. `ApiRegistration` is the persisted record: `{ apiId, title, version, description?, baseUrl, specSource: { kind: 'url', url } | { kind: 'file', fsPath }, snapshot: ParsedApi }`. Keep everything JSON-typed (`unknown`-safe accessors where the spec allows arbitrary values).
 - **Acceptance Criteria:**
   - [ ] `npm run check-types` passes with the new module referenced by no one (standalone).
@@ -43,8 +45,8 @@ This phase builds the pure-logic foundation every later phase consumes: the doma
 - **Prerequisites / Dependencies:** Tasks 1–2.
 - **Affected Files:**
   - [operations.ts](../../src/core/operations.ts) (new)
-- **Affected Symbols:** `deriveOperationId(tag: string, method: string, path: string): string`, `buildOperations(doc: OpenApiDocument): OperationInfo[]`
-- **Description:** For every path × method (`get|put|post|delete|options|head|patch|trace`) produce an `OperationInfo`. Use declared `operationId` verbatim (R-ID-1); otherwise kebab-case `<tag>/<method>-<path>` per R-ID-2: skip `{var}` segments, split on `/` and `_`, join with `-`. Group by first tag, else `default` (R-GRP-1). Enforce uniqueness within the API by appending `-2`, `-3`, … on collision (R-ID-3). Pure functions only so output is deterministic across runs (R-ID-4).
+- **Affected Symbols:** `deriveOperationId(tag: string, method: string, path: string): string`, `buildOperations(doc: OpenApiDocument): OperationInfo[]`, `buildApiModel(document, operations): ApiModel`, `buildOperationIndex(model): Map<string, OperationInfo>`, `operationsInGroups(model, names): { found, unknown }`
+- **Description:** For every path × method (`get|put|post|delete|options|head|patch|trace`) produce an `OperationInfo`. Use declared `operationId` verbatim (R-ID-1); otherwise kebab-case `<tag>/<method>-<path>` per R-ID-2: skip `{var}` segments, split on `/` and `_`, join with `-`. `buildApiModel` nests operations into alphabetically sorted groups (first tag, else `default`; R-GRP-1) and propagates tag descriptions from `document.tags`. Enforce uniqueness within the API by appending `-2`, `-3`, … on collision (R-ID-3). Pure functions only so output is deterministic across runs (R-ID-4).
 - **Acceptance Criteria:**
   - [ ] First-tag `pets`, `GET /pets/{petId}` without `operationId` → `pets-get-pets`.
   - [ ] Two operations deriving `get-pet` yield `get-pet`, `get-pet-2`.
@@ -56,7 +58,7 @@ This phase builds the pure-logic foundation every later phase consumes: the doma
 - **Prerequisites / Dependencies:** Task 4.
 - **Affected Files:**
   - [operations.test.ts](../../src/test/core/operations.test.ts) (new)
-- **Description:** Table-driven tests over the acceptance rules above plus: explicit `operationId` passthrough, mixed separators (`/a_b/c/{id}`), collision suffix ordering, determinism loop (100 iterations, deep-equal snapshot).
+- **Description:** Table-driven tests over the acceptance rules above plus: explicit `operationId` passthrough, mixed separators (`/a_b/c/{id}`), collision suffix ordering, determinism loop (100 iterations, deep-equal snapshot), tag-description propagation, index/model equivalence, and `operationsInGroups` unknown-name reporting.
 - **Acceptance Criteria:**
   - [ ] Every R-ID-* and R-GRP-1 rule has at least one failing-first test that now passes.
   - [ ] `npm test` green.
