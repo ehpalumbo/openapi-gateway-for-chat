@@ -1,0 +1,86 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Echo",
+    "version": "1.0.0",
+    "description": "Operations exercised against an ephemeral local HTTP server in integration tests."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:0",
+      "description": "Replaced at runtime with the ephemeral test server's base URL."
+    }
+  ],
+  "paths": {
+    "/pets/{petId}": {
+      "get": {
+        "tags": ["pets"],
+        "operationId": "getPetById",
+        "summary": "Fetch one pet by id",
+        "parameters": [
+          {
+            "name": "petId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          },
+          {
+            "name": "verbose",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean" }
+          },
+          {
+            "name": "X-Trace-Id",
+            "in": "header",
+            "required": false,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested pet"
+          }
+        }
+      }
+    },
+    "/pets": {
+      "post": {
+        "tags": ["pets"],
+        "operationId": "createPet",
+        "summary": "Create a pet",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Pet created"
+          }
+        }
+      }
+    },
+    "/boom": {
+      "get": {
+        "tags": ["chaos"],
+        "operationId": "detonate",
+        "summary": "Always answers 500",
+        "responses": {
+          "500": {
+            "description": "Deliberate server failure"
+          }
+        }
+      }
+    }
+  }
+}

@@ -113,6 +113,67 @@
             "operationId"
           ]
         }
+      },
+      {
+        "name": "gateway_invoke_operation",
+        "displayName": "Invoke API Operation",
+        "modelDescription": "Invokes one operation of a registered REST API against its registered base URL. Build the call from gateway_describe_operation output: pathParams must supply every required {placeholder} of the path template. Non-safe methods (POST, PUT, PATCH, DELETE, ...) require user confirmation before execution. Errors come back as structured results with status and a body excerpt for retry reasoning.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "invokeApiOperation",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "apiId": {
+              "type": "string",
+              "description": "Identifier of the API, as returned by gateway_list_apis."
+            },
+            "operationId": {
+              "type": "string",
+              "description": "Operation ID, as returned by gateway_list_operations."
+            },
+            "pathParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "description": "Values for every {placeholder} in the operation's path template."
+            },
+            "queryParams": {
+              "type": "object",
+              "additionalProperties": {},
+              "description": "Query parameter values; arrays become repeated keys."
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Extra request headers; Host and Authorization are reserved."
+            },
+            "body": {
+              "description": "JSON request body, sent only when the operation declares a request body.",
+              "type": [
+                "object",
+                "array",
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "apiId",
+            "operationId"
+          ]
+        }
       }
     ],
     "configuration": [

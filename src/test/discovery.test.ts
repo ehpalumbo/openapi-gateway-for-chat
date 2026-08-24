@@ -6,6 +6,13 @@ import { parseSpec } from '../core/openapi';
 import { buildApiModel } from '../core/operations';
 import { ApiRegistration } from '../core/types';
 import { ApiRegistry } from '../store/registry';
+import { ToolContext } from '../vscode/tools/context';
+import {
+	createDescribeApiTool,
+	createDescribeOperationTool,
+	createListApisTool,
+	createListOperationsTool,
+} from '../vscode/tools/discovery';
 import { registerGatewayTools } from '../vscode/tools';
 
 /** The four read-only discovery tools contributed in package.json. */
@@ -42,6 +49,8 @@ class FakeMemento implements vscode.Memento {
 	}
 }
 
+const noTokens = { getToken: () => Promise.resolve(undefined) };
+
 function catalogRegistration(apiId: string): ApiRegistration {
 	const document = parseSpec(readFixture('catalog30.json'));
 	return {
@@ -54,12 +63,12 @@ function catalogRegistration(apiId: string): ApiRegistration {
 	};
 }
 
-async function invoke(name: string, input: Record<string, unknown>): Promise<unknown> {
-	const result = await vscode.lm.invokeTool(
-		name,
+async function invoke(tool: vscode.LanguageModelTool<unknown>, input: Record<string, unknown>): Promise<unknown> {
+	const result = await tool.invoke(
 		{ input, toolInvocationToken: undefined },
 		new vscode.CancellationTokenSource().token
 	);
+	assert.ok(result, 'expected a tool result');
 	const part = result.content[0];
 	assert.ok(part instanceof vscode.LanguageModelTextPart, `expected a single text part`);
 	return JSON.parse((part as vscode.LanguageModelTextPart).value);
@@ -72,30 +81,44 @@ async function invoke(name: string, input: Record<string, unknown>): Promise<unk
  */
 suite('Discovery flow', () => {
 	let registry: ApiRegistry;
-	let refresh: () => void;
+	let context: ToolContext;
+	let listApisTool: vscode.LanguageModelTool<unknown>;
+	let describeApiTool: vscode.LanguageModelTool<unknown>;
+	let listOperationsTool: vscode.LanguageModelTool<unknown>;
+	let describeOperationTool: vscode.LanguageModelTool<unknown>;
 
 	suiteSetup(() => {
 		registry = new ApiRegistry(new FakeMemento());
-		refresh = registerGatewayTools(registry).refresh;
+		context = { registry, tokens: noTokens };
+		listApisTool = createListApisTool(context);
+		describeApiTool = createDescribeApiTool(context);
+		listOperationsTool = createListOperationsTool(context);
+		describeOperationTool = createDescribeOperationTool(context);
 	});
 
-	test('all four gateway_* tools are listed in vscode.lm.tools once registered', () => {
-		for (const name of DISCOVERY_TOOL_NAMES) {
-			assert.ok(vscode.lm.tools.some((tool) => tool.name === name), `${name} should be listed`);
+	test('registerGatewayTools binds every contributed name in vscode.lm.tools', () => {
+		const disposables = registerGatewayTools(context);
+		try {
+			for (const name of DISCOVERY_TOOL_NAMES) {
+				assert.ok(vscode.lm.tools.some((tool) => tool.name === name), `${name} should be listed`);
+			}
+		} finally {
+			for (const disposable of disposables) {
+				disposable.dispose();
+			}
 		}
 	});
 
 	test('with an empty registry, tools return a descriptive error result instead of throwing', async () => {
-		const payload = (await invoke('gateway_list_apis', {})) as { error?: string };
+		const payload = (await invoke(listApisTool, {})) as { error?: string };
 		assert.match(payload.error ?? '', /No APIs registered/);
 	});
 
 	test('the progressive disclosure chain works end-to-end on the fixture', async () => {
 		registry.upsert(catalogRegistration('catalog'));
 		registry.upsert(catalogRegistration('mirror'));
-		refresh();
 
-		const listed = (await invoke('gateway_list_apis', {})) as { apis: { apiId: string; title: string }[] };
+		const listed = (await invoke(listApisTool, {})) as { apis: { apiId: string; title: string }[] };
 		assert.deepStrictEqual(
 			listed.apis.map((api) => [api.apiId, api.title]),
 			[
@@ -104,7 +127,7 @@ suite('Discovery flow', () => {
 			]
 		);
 
-		const described = (await invoke('gateway_describe_api', { apiId: 'catalog' })) as {
+		const described = (await invoke(describeApiTool, { apiId: 'catalog' })) as {
 			groups: { name: string; operationCount: number }[];
 		};
 		assert.deepStrictEqual(
@@ -115,12 +138,12 @@ suite('Discovery flow', () => {
 			]
 		);
 
-		const operations = (await invoke('gateway_list_operations', { apiId: 'catalog', groups: ['items'] })) as {
+		const operations = (await invoke(listOperationsTool, { apiId: 'catalog', groups: ['items'] })) as {
 			operations: { operationId: string }[];
 		};
 		assert.deepStrictEqual(operations.operations.map((op) => op.operationId), ['createItem']);
 
-		const detail = (await invoke('gateway_describe_operation', {
+		const detail = (await invoke(describeOperationTool, {
 			apiId: 'catalog',
 			operationId: 'createItem',
 		})) as { schemas: { name: string }[] };
@@ -131,7 +154,7 @@ suite('Discovery flow', () => {
 	});
 
 	test('describe_operation excludes the decoy schema unreachable from the operation', async () => {
-		const detail = (await invoke('gateway_describe_operation', {
+		const detail = (await invoke(describeOperationTool, {
 			apiId: 'catalog',
 			operationId: 'createItem',
 		})) as { schemas: { name: string }[] };
@@ -142,7 +165,7 @@ suite('Discovery flow', () => {
 	});
 
 	test('unknown group errors enumerate the valid group names', async () => {
-		const payload = (await invoke('gateway_list_operations', { apiId: 'catalog', groups: ['nope'] })) as {
+		const payload = (await invoke(listOperationsTool, { apiId: 'catalog', groups: ['nope'] })) as {
 			error: string;
 			availableGroups: string[];
 		};
@@ -150,15 +173,14 @@ suite('Discovery flow', () => {
 		assert.deepStrictEqual(payload.availableGroups, ['admin', 'items']);
 	});
 
-	test('after unregistering, refreshed tools report the empty-registry error instead of throwing', async () => {
+	test('after unregistering, tools report the empty-registry error instead of throwing', async () => {
 		registry.remove('catalog');
 		registry.remove('mirror');
-		refresh();
 
-		const listed = (await invoke('gateway_list_apis', {})) as { error?: string };
+		const listed = (await invoke(listApisTool, {})) as { error?: string };
 		assert.match(listed.error ?? '', /No APIs registered/);
 
-		const described = (await invoke('gateway_describe_api', { apiId: 'catalog' })) as { error?: string };
+		const described = (await invoke(describeApiTool, { apiId: 'catalog' })) as { error?: string };
 		assert.match(described.error ?? '', /No APIs registered/);
 	});
 });
