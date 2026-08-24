@@ -5,6 +5,8 @@
 This phase builds the pure-logic foundation every later phase consumes: the domain types, OpenAPI JSON parsing/validation, deterministic operation-ID derivation (R-ID-1..4), and a nested, grouped API model (R-GRP-1). No `vscode` imports here, so all of it is unit-testable immediately. Later phases wrap this core with VS Code adapters.
 
 > **Refinement (agreed 2026-08-23):** instead of a flat operation list plus separate group summaries, `ApiSnapshot` holds a nested `ApiModel` — groups carry their operations (`OperationGroupModel { name, description?, operations[] }`), with tag descriptions propagated from `document.tags`. An in-memory `Map<operationId, OperationInfo>` index is derived from the model at load/refresh time via `buildOperationIndex`; it is never persisted, keeping one source of truth. The registry keeps one index per `apiId` because IDs are unique within an API only.
+>
+> **Refinement (agreed 2026-08-24):** `ApiModel` is fully self-contained so consumers never couple to the spec language: it carries `info { title, version, description? }` copied from `document.info` and `schemas: SchemaRegistry` — a JSON-serializable `Record<string, JsonSchema>` extracted once by `schemaRegistryFromDocument` in `openapi.ts`, the single point where OpenAPI specifics enter the model. Description builders and tools navigate only the model; the raw document remains in the snapshot purely as the last-good parse backing refresh. `buildApiModel(document)` derives everything internally (supersedes the two-argument shape listed in Task 4).
 
 ## Task Details
 

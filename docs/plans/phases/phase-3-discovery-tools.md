@@ -4,6 +4,12 @@
 
 This phase exposes registered APIs to language models: the `$ref` schema resolver, description builders, and the four discovery tools (`gateway_list_apis`, `gateway_describe_api`, `gateway_list_operations`, `gateway_describe_operation`) registered through `vscode.lm.registerTool` and re-registered whenever the registry changes. After this phase an agent can walk list_apis → describe_api → list_operations → describe_operation with zero network calls (NFR-4) and receive self-contained schemas (R-SCH-1/2).
 
+> **As-built refinements (2026-08-24):**
+> - Tool descriptions and input schemas are declared statically in package.json under `contributes.languageModelTools` — the Language Model Tools API requires model-facing metadata to be contributed, not passed at runtime. `src/vscode/tools.ts` registers only implementations, through a single `vscode.lm.registerTool` call site driven by a name/factory table whose factory functions return `LanguageModelTool` objects.
+> - Schemas resolve against the model's `SchemaRegistry` (see the Phase 1 refinement of 2026-08-24); `resolveSchemaClosures(schemas, rootRefs)` takes the registry directly and never sees an `OpenApiDocument`.
+> - `buildDescribeOperation(api, index, operationId)` consumes the prebuilt index from `registry.getEntry(apiId)` (derived once per mutation) instead of rebuilding it per invoke.
+> - The `DISCOVERY_TOOL_NAMES` constant lives in `src/test/discovery.test.ts`; production code keys off the factory table instead.
+
 ## Task Details
 
 ### 1. Implement the schema resolver

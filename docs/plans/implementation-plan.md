@@ -21,10 +21,11 @@ Architecture: two strict layers.
 ```
 src/
 ├── core/                   # Pure logic — never imports 'vscode' (NFR-6)
-│   ├── types.ts            # ParsedApi, ApiRegistration, OperationInfo, OperationGroup
-│   ├── openapi.ts          # parseSpec / validateDocument (JSON-only, 3.0.x|3.1.x)
-│   ├── operations.ts       # operationId derivation (R-ID-*), first-tag grouping (R-GRP-*)
-│   ├── schema-resolver.ts  # $ref closure → self-contained describe_operation (R-SCH-*)
+│   ├── types.ts            # ParsedApi, ApiRegistration, OperationInfo, OperationGroupModel, SchemaRegistry
+│   ├── openapi.ts          # parseSpec / validateDocument (JSON-only, 3.0.x|3.1.x) + schemaRegistryFromDocument
+│   ├── operations.ts       # operationId derivation (R-ID-*), first-tag grouping (R-GRP-*), self-contained ApiModel
+│   ├── schema-resolver.ts  # $ref closure over the SchemaRegistry → self-contained describe_operation (R-SCH-*)
+│   ├── describe.ts         # JSON-normalized builders behind the four gateway_* discovery tools (R-DISC-*, R-SCH-*)
 │   ├── request-builder.ts  # URL construction, required-path-param enforcement (R-INV-*)
 │   └── response-handler.ts # threshold split, temp-file spill, binary detection (R-RESP-*)
 ├── store/
@@ -45,6 +46,7 @@ src/
 Key decisions baked into this design (resolved in the spec):
 
 - Tools re-register whenever the registry changes so discovery is purely in-memory (NFR-4).
+- Discovery reads a fully derived, self-contained `ApiModel` (metadata + `SchemaRegistry` + grouped operations); only parsing touches the raw OpenAPI document, and tool descriptions/input schemas are contributed statically in package.json (`contributes.languageModelTools`) with runtime registering implementations only.
 - Confirmation uses the host UI (Continue / Cancel); no custom modal, no grant store in MVP.
 - All tests run through `@vscode/test-cli` (glob `out/test/**/*.test.js`); core unit tests simply do not import `vscode`.
 

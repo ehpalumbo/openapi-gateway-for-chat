@@ -32,9 +32,9 @@ This phase completes the agent-facing surface: `gateway_invoke_operation` execut
 - **Prerequisites / Dependencies:** Tasks 1, Phase 3 tools infrastructure, Phase 2 stores.
 - **Affected Files:**
   - [tools.ts](../../src/vscode/tools.ts) (modify)
-- **Affected Symbols:** `registerGatewayTools(...)` gains `gateway_invoke_operation`; new helpers `isSafeMethod(method)`, `buildConfirmationMessage(request)`
-- **Description:** Register fifth tool:
-  - `prepareInvocation`: resolve operation from registry; if method is not `GET`/`HEAD`, return `confirmationMessages` whose MarkdownString shows HTTP method, resolved URL, headers with `Authorization` redacted to `Bearer ***`, and a truncated body preview (R-SAFE-3); otherwise omit confirmation entirely (R-SAFE-1).
+- **Affected Symbols:** new `TOOL_FACTORIES` entry `['gateway_invoke_operation', createInvokeOperationTool]`; helpers `isSafeMethod(method)`, `buildConfirmationMessage(request)`
+- **Description:** Add a fifth factory to the table in `src/vscode/tools.ts` (the single `vscode.lm.registerTool` call site stays unchanged; see the Phase 3 as-built refinements). The factory needs the `TokenStore`, so thread it through `registerGatewayTools(context, registry, tokens)`:
+  - `prepareInvocation`: resolve operation via `registry.getEntry(apiId)` — reusing its prebuilt index, never rebuilding; if method is not `GET`/`HEAD`, return `confirmationMessages` whose MarkdownString shows HTTP method, resolved URL, headers with `Authorization` redacted to `Bearer ***`, and a truncated body preview (R-SAFE-3); otherwise omit confirmation entirely (R-SAFE-1).
   - `invoke`: build request (Task 1), attach `Authorization: Bearer <token>` from `TokenStore` if present (never logged or echoed — NFR-1), execute with global `fetch` + AbortSignal timeout, then hand the raw response to a pluggable response processor (Phase 5; this phase returns inline text for everything so Phase 5 is a drop-in).
   - Errors — network failure, non-2xx, builder validation — return structured result objects `{ error, method, url, status?, bodyExcerpt? }` instead of throwing, formatted for model retry reasoning (R-INV-5). Non-JSON response bodies are included as excerpted text.
 - **Acceptance Criteria:**
