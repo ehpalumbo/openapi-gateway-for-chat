@@ -5,7 +5,7 @@
  * (R-REG-4). All failures throw {@link SpecError} with messages written to be
  * actionable for the user and the language model (NFR-3).
  */
-import { OpenApiDocument } from './types';
+import { JsonSchema, OpenApiDocument, SchemaRegistry } from './types';
 
 /**
  * Error thrown when a document cannot be accepted as a supported OpenAPI spec.
@@ -100,4 +100,26 @@ export function parseSpec(jsonText: string): OpenApiDocument {
 	}
 
 	return parsed as unknown as OpenApiDocument;
+}
+
+/**
+ * Extracts the document's named schema components into a {@link SchemaRegistry}
+ * for the API model. This is the single point where OpenAPI specifics
+ * (`components.schemas` and its `#/components/schemas/...` reference scheme)
+ * enter the derived model.
+ *
+ * @param doc - Parsed OpenAPI document.
+ * @returns The schema components keyed by name; empty when the document
+ *          declares none.
+ */
+export function schemaRegistryFromDocument(doc: OpenApiDocument): SchemaRegistry {
+	const schemas = doc.components?.schemas;
+	if (!schemas || typeof schemas !== 'object') {
+		return {};
+	}
+	const registry: SchemaRegistry = {};
+	for (const [name, schema] of Object.entries(schemas)) {
+		registry[name] = schema as JsonSchema;
+	}
+	return registry;
 }

@@ -210,10 +210,26 @@ export interface OperationGroupModel {
 }
 
 /**
+ * The named schema components of one API, keyed by component name.
+ *
+ * Derived once at parse time so the rest of the extension navigates schemas
+ * without coupling to the source specification language. A plain record keeps
+ * it JSON-serializable for persistence inside snapshots.
+ */
+export type SchemaRegistry = Record<string, JsonSchema>;
+
+/**
  * The grouped operation structure of one API: the single source of truth for
  * discovery tools, from which the in-memory operation index is derived.
+ *
+ * Self-contained by design — everything the tools expose (metadata, schema
+ * components, groups) lives here, so consumers never touch the raw document.
  */
 export interface ApiModel {
+	/** API metadata copied from the spec's `info` block at parse time. */
+	info: { title: string; version: string; description?: string };
+	/** Named schema components referenced by parameters, bodies, and responses. */
+	schemas: SchemaRegistry;
 	/** Groups sorted alphabetically by name. */
 	groups: OperationGroupModel[];
 }
@@ -223,7 +239,7 @@ export interface ApiModel {
  * stay usable when a later refresh fails (R-REG-7).
  */
 export interface ApiSnapshot {
-	/** Parsed document backing the snapshot. */
+	/** Parsed document backing the snapshot (for migration purposes) */
 	document: OpenApiDocument;
 	/** Grouped operation model derived from {@link document}. */
 	model: ApiModel;

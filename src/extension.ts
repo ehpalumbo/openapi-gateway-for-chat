@@ -1,30 +1,24 @@
 import * as vscode from 'vscode';
-import { CommandContext, refreshAll, registerApiCommands } from './vscode/commands/index';
 import { ApiRegistry } from './store/registry';
 import { TokenStore } from './store/secrets';
-
-/**
- * Registers the gateway language-model tools.
- *
- * Stubbed until Phase 3 lands; returns the disposables owning the tools so
- * this phase compiles and runs standalone.
- */
-function registerGatewayTools(_ctx: CommandContext): vscode.Disposable[] {
-	return [];
-}
+import { CommandContext, refreshAll, registerApiCommands } from './vscode/commands/index';
+import { registerGatewayTools } from './vscode/tools';
 
 export function activate(context: vscode.ExtensionContext) {
 	const registry = new ApiRegistry(context.globalState);
 	const tokens = new TokenStore(context.secrets);
+	const tools = registerGatewayTools(registry);
 	const ctx: CommandContext = {
 		registry,
 		tokens,
 		onChange: () => {
-			// Tools re-register on every registry change (Phase 3).
+			// Tools re-register on every registry change so discovery always
+			// reflects the current snapshot set (NFR-4).
+			tools.refresh();
 		},
 	};
 
-	context.subscriptions.push(...registerApiCommands(ctx), ...registerGatewayTools(ctx));
+	context.subscriptions.push(...registerApiCommands(ctx), tools);
 
 	void refreshAll(ctx).catch((err: unknown) => {
 		void vscode.window.showErrorMessage(
@@ -33,4 +27,4 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 }
 
-export function deactivate() {}
+export function deactivate() { }

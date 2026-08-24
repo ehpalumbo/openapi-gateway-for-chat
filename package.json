@@ -14,11 +14,11 @@
   "contributes": {
     "commands": [
       {
-        "command": "openapi-gateway-for-chat.registerFromUrl",
+        "command": "openapi-gateway-for-chat.registerApiFromUrl",
         "title": "OpenAPI Gateway: Register API from URL"
       },
       {
-        "command": "openapi-gateway-for-chat.registerFromFile",
+        "command": "openapi-gateway-for-chat.registerApiFromFile",
         "title": "OpenAPI Gateway: Register API from File"
       },
       {
@@ -28,6 +28,91 @@
       {
         "command": "openapi-gateway-for-chat.refreshApis",
         "title": "OpenAPI Gateway: Refresh APIs"
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "gateway_list_apis",
+        "displayName": "List Registered APIs",
+        "modelDescription": "Lists REST APIs registered by the user via the OpenAPI Gateway. Each entry has an apiId you pass to the other gateway_* tools. Start here before calling any API.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "listApis",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      },
+      {
+        "name": "gateway_describe_api",
+        "displayName": "Describe Registered API",
+        "modelDescription": "Describes one registered REST API: metadata plus its operation groups (name, description, operation count). Use it to pick relevant groups before listing operations.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "describeApi",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "apiId": {
+              "type": "string",
+              "description": "Identifier of the API, as returned by gateway_list_apis."
+            }
+          },
+          "required": [
+            "apiId"
+          ]
+        }
+      },
+      {
+        "name": "gateway_list_operations",
+        "displayName": "List API Operations",
+        "modelDescription": "Lists operations of one or more named groups of a registered REST API: operation IDs, methods, paths, summaries, and required parameters.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "listApiOperations",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "apiId": {
+              "type": "string",
+              "description": "Identifier of the API, as returned by gateway_list_apis."
+            },
+            "groups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "One or more group names, as returned by gateway_describe_api."
+            }
+          },
+          "required": [
+            "apiId",
+            "groups"
+          ]
+        }
+      },
+      {
+        "name": "gateway_describe_operation",
+        "displayName": "Describe API Operation",
+        "modelDescription": "Describes one operation of a registered REST API in full detail: parameters, request-body schema, and response schemas per status code, with all referenced schemas included inline. Use its output to build a valid gateway_invoke_operation call.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "describeApiOperation",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "apiId": {
+              "type": "string",
+              "description": "Identifier of the API, as returned by gateway_list_apis."
+            },
+            "operationId": {
+              "type": "string",
+              "description": "Operation ID, as returned by gateway_list_operations."
+            }
+          },
+          "required": [
+            "apiId",
+            "operationId"
+          ]
+        }
       }
     ],
     "configuration": [

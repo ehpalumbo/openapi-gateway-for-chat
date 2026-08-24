@@ -4,7 +4,8 @@
  * All functions are pure and deterministic: the same document always yields
  * the same operation IDs and groups, across activations and refreshes.
  */
-import { HTTP_METHODS, ApiModel, HttpMethod, OpenApiDocument, OpenApiOperation, OpenApiParameter, OperationGroupModel, OperationInfo, OperationParameter } from './types';
+import { schemaRegistryFromDocument } from './openapi';
+import { ApiModel, HTTP_METHODS, HttpMethod, OpenApiDocument, OpenApiOperation, OpenApiParameter, OperationGroupModel, OperationInfo, OperationParameter } from './types';
 
 /** Group assigned to operations that declare no tags. */
 const DEFAULT_GROUP = 'default';
@@ -126,15 +127,17 @@ export function buildOperations(document: OpenApiDocument): OperationInfo[] {
 }
 
 /**
- * Builds the grouped {@link ApiModel} for one API: operations nested into
- * groups sorted alphabetically, each group carrying its document-level tag
+ * Builds the gateway's {@link ApiModel} for one API: metadata and schema
+ * components copied from the document plus operations nested into groups
+ * sorted alphabetically, each group carrying its document-level tag
  * description when available (R-DISC-2, R-GRP-*).
  *
  * Identity rules (R-ID-1..4) are applied by {@link buildOperations}, which is
- * invoked internally; callers never handle the flat operation list.
+ * invoked internally; callers never handle the flat operation list. The result
+ * is fully self-contained: nothing downstream needs the raw document.
  *
  * @param document - A parsed, validated OpenAPI document.
- * @returns The grouped model; the single source of truth stored in a snapshot.
+ * @returns The grouped model with metadata and schema registry.
  */
 export function buildApiModel(document: OpenApiDocument): ApiModel {
 	const operations = buildOperations(document);
@@ -153,7 +156,16 @@ export function buildApiModel(document: OpenApiDocument): ApiModel {
 			const description = document.tags?.find((tag) => tag.name === name)?.description;
 			return { name, description, operations: groupOps };
 		});
-	return { groups };
+	const { title, version, description } = document.info;
+	return {
+		info: {
+			title,
+			version,
+			description,
+		},
+		schemas: schemaRegistryFromDocument(document),
+		groups,
+	};
 }
 
 /**

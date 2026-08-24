@@ -1,0 +1,128 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Catalog",
+    "version": "2.1.0",
+    "description": "Catalog service with nested schema references."
+  },
+  "servers": [
+    { "url": "https://catalog.example.com/v2" }
+  ],
+  "tags": [
+    { "name": "items", "description": "Item management." },
+    { "name": "admin", "description": "Administrative endpoints." }
+  ],
+  "paths": {
+    "/items": {
+      "post": {
+        "operationId": "createItem",
+        "tags": ["items"],
+        "summary": "Create an item.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NewItem" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Item" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/widgets/{widgetId}": {
+      "get": {
+        "operationId": "getWidget",
+        "tags": ["admin"],
+        "summary": "Fetch a widget (decoy operation).",
+        "parameters": [
+          { "name": "widgetId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The widget.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Widget" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "NewItem": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "tag": { "$ref": "#/components/schemas/Tag" }
+        }
+      },
+      "Tag": {
+        "type": "object",
+        "properties": {
+          "label": { "type": "string" }
+        }
+      },
+      "Item": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "tag": { "$ref": "#/components/schemas/Tag" },
+          "variants": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Variant" }
+          }
+        }
+      },
+      "Variant": {
+        "type": "object",
+        "properties": {
+          "sku": { "type": "string" },
+          "attributes": { "$ref": "#/components/schemas/AttributeMap" }
+        }
+      },
+      "AttributeMap": {
+        "type": "object",
+        "additionalProperties": { "type": "string" }
+      },
+      "Widget": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" }
+        }
+      },
+      "Node": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "string" },
+          "child": { "$ref": "#/components/schemas/Node" }
+        }
+      },
+      "Left": {
+        "type": "object",
+        "properties": {
+          "right": { "$ref": "#/components/schemas/Right" }
+        }
+      },
+      "Right": {
+        "type": "object",
+        "properties": {
+          "left": { "$ref": "#/components/schemas/Left" }
+        }
+      }
+    }
+  }
+}
