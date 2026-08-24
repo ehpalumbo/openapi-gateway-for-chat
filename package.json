@@ -63,7 +63,7 @@
         }
       },
       {
-        "name": "gateway_list_operations",
+        "name": "gateway_list_api_operations",
         "displayName": "List API Operations",
         "modelDescription": "Lists operations of one or more named groups of a registered REST API: operation IDs, methods, paths, summaries, and required parameters.",
         "canBeReferencedInPrompt": true,
@@ -91,7 +91,7 @@
         }
       },
       {
-        "name": "gateway_describe_operation",
+        "name": "gateway_describe_api_operation",
         "displayName": "Describe API Operation",
         "modelDescription": "Describes one operation of a registered REST API in full detail: parameters, request-body schema, and response schemas per status code, with all referenced schemas included inline. Use its output to build a valid gateway_invoke_operation call.",
         "canBeReferencedInPrompt": true,
@@ -105,7 +105,7 @@
             },
             "operationId": {
               "type": "string",
-              "description": "Operation ID, as returned by gateway_list_operations."
+              "description": "Operation ID, as returned by gateway_list_api_operations."
             }
           },
           "required": [
@@ -117,7 +117,7 @@
       {
         "name": "gateway_invoke_operation",
         "displayName": "Invoke API Operation",
-        "modelDescription": "Invokes one operation of a registered REST API against its registered base URL. Build the call from gateway_describe_operation output: pathParams must supply every required {placeholder} of the path template. Non-safe methods (POST, PUT, PATCH, DELETE, ...) require user confirmation before execution. Errors come back as structured results with status and a body excerpt for retry reasoning.",
+        "modelDescription": "Invokes one operation of a registered REST API against its registered base URL. Build the call from gateway_describe_api_operation output: pathParams must supply every required {placeholder} of the path template. Non-safe methods (POST, PUT, PATCH, DELETE, ...) require user confirmation before execution. Errors come back as structured results with status and a body excerpt for retry reasoning.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "invokeApiOperation",
         "inputSchema": {
@@ -129,7 +129,7 @@
             },
             "operationId": {
               "type": "string",
-              "description": "Operation ID, as returned by gateway_list_operations."
+              "description": "Operation ID, as returned by gateway_list_api_operations."
             },
             "pathParams": {
               "type": "object",

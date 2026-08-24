@@ -198,7 +198,7 @@ export interface OperationInfo {
 
 /**
  * A named group of operations with its operations nested inside, as exposed by
- * `gateway_describe_api` and consumed by `gateway_list_operations`.
+ * `gateway_describe_api` and consumed by `gateway_list_api_operations`.
  */
 export interface OperationGroupModel {
 	/** Group name: first tag or `default`. */

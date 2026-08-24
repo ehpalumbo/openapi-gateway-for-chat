@@ -21,8 +21,8 @@ export type { ToolContext } from './context';
 const TOOL_FACTORIES: readonly (readonly [name: string, factory: ToolFactory])[] = [
 	['gateway_list_apis', createListApisTool],
 	['gateway_describe_api', createDescribeApiTool],
-	['gateway_list_operations', createListOperationsTool],
-	['gateway_describe_operation', createDescribeOperationTool],
+	['gateway_list_api_operations', createListOperationsTool],
+	['gateway_describe_api_operation', createDescribeOperationTool],
 	['gateway_invoke_operation', createInvokeOperationTool],
 ];
 

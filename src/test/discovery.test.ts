@@ -19,8 +19,8 @@ import { registerGatewayTools } from '../vscode/tools';
 const DISCOVERY_TOOL_NAMES = [
 	'gateway_list_apis',
 	'gateway_describe_api',
-	'gateway_list_operations',
-	'gateway_describe_operation',
+	'gateway_list_api_operations',
+	'gateway_describe_api_operation',
 ] as const;
 
 const FIXTURES = path.resolve(__dirname, '../../src/test/fixtures');

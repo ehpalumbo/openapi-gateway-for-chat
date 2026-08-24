@@ -14,7 +14,7 @@
 
 ## Executive Summary & Architecture
 
-Implement the MVP of a VS Code extension that exposes remote REST APIs to AI agents as native language model tools via `vscode.lm.registerTool`. Users register OpenAPI **3.0.x / 3.1.x JSON** documents by URL or workspace file picker; registrations persist user-globally (`globalState`) with Bearer tokens in `SecretStorage`. Five tools (`gateway_list_apis`, `gateway_describe_api`, `gateway_list_operations`, `gateway_describe_operation`, `gateway_invoke_operation`) provide progressive discovery and invocation. Non-safe invocations are confirmed through the platform's native `prepareInvocation` / `confirmationMessages` flow (grants deferred post-MVP). Responses are size-aware: below 8 KB (configurable) they are inlined; above they spill to a temp file; binaries always spill.
+Implement the MVP of a VS Code extension that exposes remote REST APIs to AI agents as native language model tools via `vscode.lm.registerTool`. Users register OpenAPI **3.0.x / 3.1.x JSON** documents by URL or workspace file picker; registrations persist user-globally (`globalState`) with Bearer tokens in `SecretStorage`. Five tools (`gateway_list_apis`, `gateway_describe_api`, `gateway_list_api_operations`, `gateway_describe_api_operation`, `gateway_invoke_operation`) provide progressive discovery and invocation. Non-safe invocations are confirmed through the platform's native `prepareInvocation` / `confirmationMessages` flow (grants deferred post-MVP). Responses are size-aware: below 8 KB (configurable) they are inlined; above they spill to a temp file; binaries always spill.
 
 Architecture: two strict layers.
 

@@ -104,7 +104,7 @@ export function buildDescribeApi({ apiId, title, version, snapshot }: ApiRegistr
 }
 
 /**
- * One operation as listed by `gateway_list_operations`: enough for the agent to
+ * One operation as listed by `gateway_list_api_operations`: enough for the agent to
  * decide whether to drill into `describe_operation`, not enough to flood
  * context (R-DISC-3).
  */
@@ -193,7 +193,7 @@ export interface ResponseDescription {
 }
 
 /**
- * The `gateway_describe_operation` payload: everything an agent needs to build
+ * The `gateway_describe_api_operation` payload: everything an agent needs to build
  * a valid request without further lookups (R-SCH-2). All schemas referenced by
  * parameters, request body, and responses are flattened into {@link schemas}
  * "after each other"; unrelated components are never included (R-SCH-1).

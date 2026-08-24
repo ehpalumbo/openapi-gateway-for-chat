@@ -139,7 +139,7 @@ Confirmation is implemented via the Language Model Tools API's native mechanism:
 
 All five tools share conventions:
 
-- Names use the `gateway_` prefix and snake_case (valid for `vscode.lm` tool name constraints): `gateway_list_apis`, `gateway_describe_api`, `gateway_list_operations`, `gateway_describe_operation`, `gateway_invoke_operation`.
+- Names use the `gateway_` prefix and snake_case (valid for `vscode.lm` tool name constraints): `gateway_list_apis`, `gateway_describe_api`, `gateway_list_api_operations`, `gateway_describe_api_operation`, `gateway_invoke_operation`.
 - Inputs and outputs are JSON objects; outputs include a stable shape with `content` payloads designed for LLM consumption (concise summaries + structured fields).
 - Unknown `apiId` / `operationId` / group values produce error results naming valid alternatives where feasible (e.g., available groups on unknown-group error).
 
