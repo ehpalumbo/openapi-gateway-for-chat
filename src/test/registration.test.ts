@@ -4,11 +4,16 @@ import * as http from 'http';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { parseSpec, SpecError } from '../core/openapi';
-import { buildOperationIndex } from '../core/operations';
 import { ApiRegistration, SpecSource } from '../core/types';
 import { ApiRegistry } from '../store/registry';
 import { TokenStore } from '../store/secrets';
-import { createRegistration, loadSpecFromSource, refreshAll, resolveBaseUrlSuggestion, slugifyTitle, CommandContext } from '../vscode/commands/index';
+import {
+	createRegistration,
+	loadSpecFromSource,
+	resolveBaseUrlSuggestion,
+	slugifyTitle,
+} from '../vscode/commands/common';
+import { CommandContext, refreshAll } from '../vscode/commands/index';
 import { fetchWithLimit, ProtocolNotAllowedError, SizeLimitExceededError } from '../vscode/http';
 
 const FIXTURES = path.resolve(__dirname, '../../src/test/fixtures');

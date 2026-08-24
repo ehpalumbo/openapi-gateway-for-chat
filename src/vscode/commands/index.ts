@@ -1,9 +1,10 @@
 /**
- * Aggregates the four gateway registration commands (R-REG-1..3, 6).
+ * Activation-facing surface of the command layer: binds the four gateway
+ * registration commands (R-REG-1..3, 6) to their VS Code command IDs and
+ * exposes only what extension activation needs.
  *
- * Command modules export plain handlers accepting the shared context; this is
- * the only place they are bound to VS Code command IDs. Re-exported symbols
- * are consumed by integration tests and activation.
+ * Internal helpers stay in `./common` / `./refresh`; tests import those
+ * modules directly.
  */
 import * as vscode from 'vscode';
 import { CommandContext } from './common';
@@ -11,7 +12,7 @@ import { refreshApis } from './refresh';
 import { registerFromFile as registerApiFromFile, registerFromUrl as registerApiFromUrl } from './register';
 import { unregisterApi } from './unregister';
 
-export { buildSnapshot, CommandContext, createRegistration, loadSpecFromSource, resolveBaseUrlSuggestion, slugifyTitle } from './common';
+export type { CommandContext } from './common';
 export { refreshAll } from './refresh';
 
 const COMMAND_PREFIX = 'openapi-gateway-for-chat';
