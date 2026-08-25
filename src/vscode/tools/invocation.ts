@@ -5,14 +5,23 @@
  *
  * Errors — network failure, non-2xx responses, builder validation — are
  * returned as structured results instead of throwing so the model can reason
- * about retry or correction (R-INV-5). The raw response is handed to the
- * pluggable {@link processResponse} seam, which Phase 5 replaces with
- * size-aware splitting and binary detection (R-RESP-*).
+ * about retry or correction (R-INV-5). Every response carrying an HTTP status
+ * is served as a uniform two-part result (R-RESP-1): a metadata text part
+ * ({status, statusLine, headers}) followed by the body. Bodies are routed by
+ * content type (R-RESP-3): textual ones as a text part with the UTF-8 body,
+ * vision-safe images as an image `LanguageModelDataPart`, and non-image
+ * binaries spilled to disk under `<storageUri>/response-spills/` with a text
+ * part referencing the absolute path — Copilot only forwards text parts and
+ * image data parts from tool results into the model prompt (see
+ * microsoft/vscode#275300). Only failures without a status — network errors —
+ * fall back to a plain single-text result.
  */
 import * as vscode from 'vscode';
 import { buildRequest, InvokeInput, RequestBuildError } from '../../core/request-builder';
+import { buildSpillFileName, isSupportedImageContentType, isTextContentType } from '../../core/response-handler';
 import { OperationInfo } from '../../core/types';
 import { RegistryEntry } from '../../store/registry';
+import { randomToken } from '../spills';
 import { asRecord, errorResult, isFailure, readString, resolveEntry, textResult } from './common';
 import { ToolContext } from './context';
 
@@ -26,16 +35,24 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const BODY_PREVIEW_LIMIT = 600;
 const EXCERPT_LIMIT = 1000;
 
+/** MIME type assumed when the server does not declare one. */
+const DEFAULT_MIME_TYPE = 'application/octet-stream';
+
 /** An operation resolved together with its registration's runtime view. */
 interface ResolvedOperation {
 	entry: RegistryEntry;
 	operation: OperationInfo;
 }
 
+/**
+ * Creates the `gateway_invoke_operation` tool, which builds and executes an
+ * HTTP request against a registered base URL with Bearer-token injection and
+ * native safety confirmation (R-SAFE-*).
+ */
 export function createInvokeOperationTool(context: ToolContext): vscode.LanguageModelTool<unknown> {
 	return {
-		prepareInvocation: (options) => prepareInvocation(context, asRecord(options.input)),
-		invoke: (options) => invokeOperation(context, asRecord(options.input)),
+		prepareInvocation: ({ input }) => prepareInvocation(context, asRecord(input)),
+		invoke: ({ input }) => invokeOperation(context, asRecord(input)),
 	};
 }
 
@@ -187,7 +204,74 @@ async function executeOperation(
 			)
 		);
 	}
-	return textResult(await processResponse(response));
+	return serveResponse(entry, operation, response, context);
+}
+
+/**
+ * Serves any response that carries an HTTP status as a uniform two-part
+ * result (R-RESP-1): a metadata text part first, then the body routed by
+ * content type (R-RESP-3). Non-2xx statuses are not special-cased — the
+ * model reads the status from the metadata part.
+ */
+async function serveResponse(
+	entry: RegistryEntry,
+	operation: OperationInfo,
+	response: Response,
+	context: ToolContext
+): Promise<vscode.LanguageModelToolResult> {
+	const headers = headersToRecord(response.headers);
+	const statusLine = `${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+	const bytes = new Uint8Array(await response.arrayBuffer());
+	const mimeType = headers['content-type'] ?? DEFAULT_MIME_TYPE;
+	const baseMimeType = mimeType.split(';')[0].trim().toLowerCase();
+	const metadataPart = new vscode.LanguageModelTextPart(JSON.stringify({ status: response.status, statusLine, headers }, null, 2));
+
+	if (isSupportedImageContentType(baseMimeType)) {
+		return new vscode.LanguageModelToolResult([metadataPart, new vscode.LanguageModelDataPart(bytes, baseMimeType)]);
+	}
+	if (isTextContentType(baseMimeType)) {
+		return new vscode.LanguageModelToolResult([metadataPart, new vscode.LanguageModelTextPart(new TextDecoder().decode(bytes))]);
+	}
+	return new vscode.LanguageModelToolResult([metadataPart, await spillBody(entry, operation, mimeType, bytes, context)]);
+}
+
+/**
+ * Writes a non-image binary body to the spill directory and renders it as a
+ * text part referencing the absolute path plus content type and byte size —
+ * Copilot drops non-image data parts from tool results (R-RESP-3).
+ */
+async function spillBody(
+	entry: RegistryEntry,
+	operation: OperationInfo,
+	mimeType: string,
+	bytes: Uint8Array,
+	context: ToolContext
+): Promise<vscode.LanguageModelTextPart> {
+	const fileName = buildSpillFileName(`${entry.registration.apiId}-${operation.operationId}`, mimeType, randomToken);
+	const filePath = await context.spills.write(fileName, bytes);
+	return new vscode.LanguageModelTextPart(
+		JSON.stringify(
+			{
+				contentType: mimeType,
+				byteSize: bytes.byteLength,
+				filePath,
+				hint:
+					'The binary body was saved to this file because it cannot be delivered as model-readable text. ' +
+					'Inspect it with shell tools, or open the file directly.',
+			},
+			null,
+			2
+		)
+	);
+}
+
+/** Flattens a fetch `Headers` bag into a plain record for tool output. */
+function headersToRecord(headers: Headers): Record<string, string> {
+	const record: Record<string, string> = {};
+	headers.forEach((value, key) => {
+		record[key] = value;
+	});
+	return record;
 }
 
 /** Injects the stored Bearer token; the value is never logged or echoed (NFR-1). */
@@ -207,34 +291,10 @@ function performRequest(request: ReturnType<typeof buildRequest>): Promise<Respo
 	});
 }
 
-/**
- * Turns a raw HTTP response into the tool-result payload. Phase 4 inlines
- * text for everything; Phase 5 swaps this implementation without touching
- * the rest of the tool.
- */
-type ResponseProcessor = (response: Response) => Promise<unknown>;
-
-const processResponse: ResponseProcessor = async (response) => {
-	const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
-	const raw = await response.text();
-	if (!response.ok) {
-		return structuredError(
-			`HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}: the server rejected the request.`,
-			response.url,
-			response.status,
-			excerpt(raw)
-		);
-	}
-	const body = isJsonContentType(contentType) ? parseJsonOrText(raw) : raw;
-	return { status: response.status, contentType, body };
-};
-
-function structuredError(error: string, url: string, status?: number, bodyExcerpt?: string): Record<string, unknown> {
+function structuredError(error: string, url: string): Record<string, unknown> {
 	return {
 		error,
 		url,
-		...(status !== undefined ? { status } : {}),
-		...(bodyExcerpt !== undefined ? { bodyExcerpt } : {}),
 		hint: 'Correct the arguments and retry, or pick a different operation.',
 	};
 }
@@ -263,16 +323,4 @@ function previewBody(body: unknown): string | undefined {
 
 function excerpt(text: string, limit = EXCERPT_LIMIT): string {
 	return text.length > limit ? `${text.slice(0, limit)}… [truncated ${text.length - limit} more characters]` : text;
-}
-
-function isJsonContentType(contentType: string): boolean {
-	return contentType.split(';')[0].trim().endsWith('/json') || contentType.includes('+json');
-}
-
-function parseJsonOrText(raw: string): unknown {
-	try {
-		return JSON.parse(raw);
-	} catch {
-		return raw;
-	}
 }

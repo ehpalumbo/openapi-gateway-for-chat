@@ -131,9 +131,24 @@ Confirmation is implemented via the Language Model Tools API's native mechanism:
 
 | ID | Requirement |
 | ---- | ------------- |
-| R-RESP-1 | Responses below a configurable size threshold (setting `openapiGateway.inlineResponseThreshold`, default **8 KB**) are inlined in the tool result; including status code and headers. |
-| R-RESP-2 | Responses above the threshold are written to a temporary file; the tool result returns the file path/link plus metadata: status line, headers, and body byte size — letting the agent decide how to process the payload (e.g., open, grep, jq, etc.). |
-| R-RESP-3 | Binary responses are detected via content type and never inlined into tool results; they follow the temp-file path of R-RESP-2. |
+| R-RESP-1 | Every response carrying an HTTP status is served as a uniform two-part tool result: a metadata **text part** containing JSON `{ status, statusLine, headers }`, followed by the body routed by content type per R-RESP-3. |
+| R-RESP-2 | Non-2xx statuses are **not** special-cased: they follow the same uniform shape, with the status readable from the metadata part and the error body served whole — no truncation or capping. |
+| R-RESP-3 | Bodies are routed by content type: textual types (`text/*`, `application/json`, `+json`) become a text part with the UTF-8 body; vision-safe images (`image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/bmp`) become an image `LanguageModelDataPart`; every other binary body is written via **`vscode.workspace.fs`** to `<storageUri>/response-spills/<apiId>-<operationId>-<uuid>.<ext>` (unique names so concurrent/repeated calls never override each other) and referenced from a text part with content type, byte size, and absolute path. Spilled files are removed on extension `deactivate`. |
+
+> Design history (2026-08-26): three iterations, both driven by how Copilot
+> Chat actually assembles model prompts from tool results — it forwards only
+> text parts and image data parts; every other `LanguageModelDataPart` renders
+> as an empty string (see microsoft/vscode#275300, #275269):
+>
+> 1. Size-threshold split with spill files for oversize/binary bodies
+>    (`openapiGateway.inlineResponseThreshold`); removed because
+>    `vscode.workspace.fs` cannot stream writes, so spilling would require
+>    buffering whole bodies in memory anyway.
+> 2. Everything inline as data parts (`LanguageModelDataPart.json` metadata +
+>    raw bytes); removed because Copilot silently drops non-image data parts.
+> 3. Current design: text parts for metadata/text bodies, image data parts
+>    for vision-safe images, spill files (via `workspace.fs`) only for
+>    non-image binaries that cannot reach the model any other way.
 
 ## 4. Tool Contracts
 
@@ -184,9 +199,10 @@ Reference input schemas (informative; normative shape defined by implementation)
 
 Resolved decisions (2026-08-23):
 
-1. **Inline-response size threshold:** default 8 KB, configurable via `openapiGateway.inlineResponseThreshold`.
+1. **Inline-response size threshold:** ~~default 8 KB, configurable via `openapiGateway.inlineResponseThreshold`.~~ Removed in review (2026-08-26): responses are always returned whole as data parts; see decision 4.
 2. **Multiple `servers`:** the user confirms a single base URL at registration time (R-REG-9): when several servers are declared a QuickPick selects one, then an editable confirmation prompt (always shown) lets the user override the value; `invoke_operation` uses only that registered base URL. No server selection at invocation time in MVP.
 3. **"Always allow" grants:** feature deferred entirely post-MVP (see Non-Goals); stale-grant semantics become moot until grants are introduced.
+4. **Response serving mechanics (2026-08-26, rev. 3):** every HTTP response is a two-part tool result — text-part JSON metadata ({status, statusLine, headers}) first, then the body routed by content type: UTF-8 text part for textual types, image `LanguageModelDataPart` for vision-safe images, spill file under `<storageUri>/response-spills/` for non-image binaries (deleted on `deactivate`). Constraint driving the shape: Copilot Chat forwards only text parts and image data parts from tool results into the model prompt (microsoft/vscode#275300). See the design history in §3.8 for the two superseded iterations.
 
 Open questions:
 

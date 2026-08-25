@@ -183,19 +183,6 @@
           ]
         }
       }
-    ],
-    "configuration": [
-      {
-        "title": "OpenAPI Gateway",
-        "properties": {
-          "openapiGateway.inlineResponseThreshold": {
-            "type": "number",
-            "default": 8192,
-            "scope": "application",
-            "description": "Maximum response size in bytes to inline into tool results; larger responses spill to a temp file."
-          }
-        }
-      }
     ]
   },
   "scripts": {

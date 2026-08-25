@@ -81,6 +81,42 @@
           }
         }
       }
+    },
+    "/reports/large": {
+      "get": {
+        "tags": ["reports"],
+        "operationId": "getLargeReport",
+        "summary": "Returns a JSON payload larger than the inline threshold",
+        "responses": {
+          "200": {
+            "description": "A large report"
+          }
+        }
+      }
+    },
+    "/logo.png": {
+      "get": {
+        "tags": ["media"],
+        "operationId": "getLogo",
+        "summary": "Returns a small binary PNG payload",
+        "responses": {
+          "200": {
+            "description": "The logo image"
+          }
+        }
+      }
+    },
+    "/report.pdf": {
+      "get": {
+        "tags": ["reports"],
+        "operationId": "getPdfReport",
+        "summary": "Returns a non-image binary PDF payload",
+        "responses": {
+          "200": {
+            "description": "The report document"
+          }
+        }
+      }
     }
   }
 }

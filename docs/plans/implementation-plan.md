@@ -14,7 +14,7 @@
 
 ## Executive Summary & Architecture
 
-Implement the MVP of a VS Code extension that exposes remote REST APIs to AI agents as native language model tools via `vscode.lm.registerTool`. Users register OpenAPI **3.0.x / 3.1.x JSON** documents by URL or workspace file picker; registrations persist user-globally (`globalState`) with Bearer tokens in `SecretStorage`. Five tools (`gateway_list_apis`, `gateway_describe_api`, `gateway_list_api_operations`, `gateway_describe_api_operation`, `gateway_invoke_operation`) provide progressive discovery and invocation. Non-safe invocations are confirmed through the platform's native `prepareInvocation` / `confirmationMessages` flow (grants deferred post-MVP). Responses are size-aware: below 8 KB (configurable) they are inlined; above they spill to a temp file; binaries always spill.
+Implement the MVP of a VS Code extension that exposes remote REST APIs to AI agents as native language model tools via `vscode.lm.registerTool`. Users register OpenAPI **3.0.x / 3.1.x JSON** documents by URL or workspace file picker; registrations persist user-globally (`globalState`) with Bearer tokens in `SecretStorage`. Five tools (`gateway_list_apis`, `gateway_describe_api`, `gateway_list_api_operations`, `gateway_describe_api_operation`, `gateway_invoke_operation`) provide progressive discovery and invocation. Non-safe invocations are confirmed through the platform's native `prepareInvocation` / `confirmationMessages` flow (grants deferred post-MVP). Every HTTP response is a two-part tool result: text-part JSON metadata ({status, statusLine, headers}) plus the body routed by content type — UTF-8 text part, image data part for vision-safe images, or a spill file under workspace storage for non-image binaries (Copilot only forwards text and image parts; see spec decision 4).
 
 Architecture: two strict layers.
 
@@ -27,7 +27,7 @@ src/
 │   ├── schema-resolver.ts  # $ref closure over the SchemaRegistry → self-contained describe_operation (R-SCH-*)
 │   ├── describe.ts         # JSON-normalized builders behind the four gateway_* discovery tools (R-DISC-*, R-SCH-*)
 │   ├── request-builder.ts  # URL construction, required-path-param enforcement (R-INV-*)
-│   └── response-handler.ts # threshold split, temp-file spill, binary detection (R-RESP-*)
+│   └── response-handler.ts # content-type classification + spill-file naming (R-RESP-*)
 ├── store/
 │   ├── registry.ts         # ApiRegistry over globalState; last-good snapshots (R-REG-5..7)
 │   └── secrets.ts          # TokenStore over SecretStorage (R-AUTH-2)
@@ -67,7 +67,7 @@ Key decisions baked into this design (resolved in the spec):
 - **Environment Variables:** None.
 - **Feature Flags:** None.
 - **External Dependencies:** None beyond the existing scaffold (`@types/vscode`, `@vscode/test-cli`, esbuild). No runtime dependencies — use Node's global `fetch` (Node ≥ 18 in VS Code runtime).
-- **Settings contributed:** `openapiGateway.inlineResponseThreshold` (number, bytes, default `8192`).
+- **Settings contributed:** None. (`openapiGateway.inlineResponseThreshold` was removed in review along with spill-to-file; see spec decision 4.)
 
 ---
 
@@ -77,7 +77,7 @@ Key decisions baked into this design (resolved in the spec):
 
 All suites run via `npm test` (`vscode-test`), compiled by `npm run compile-tests`:
 
-- Unit suites under `src/test/core/**` exercise pure logic (parsing, ID derivation, schema resolution, request building, response splitting) without importing `vscode`.
+- Unit suites under `src/test/core/**` exercise pure logic (parsing, ID derivation, schema resolution, request building) without importing `vscode`.
 - Integration suites under `src/test/**` cover registration flows against fixtures in `src/test/fixtures/`, tool visibility via `vscode.lm.tools`, and live invocation against an ephemeral local HTTP server started inside the test.
 
 ### Manual Verification Steps
@@ -85,7 +85,7 @@ All suites run via `npm test` (`vscode-test`), compiled by `npm run compile-test
 1. F5 launch (Extension Development Host); run **Register API from URL** against a public petstore-style 3.0 JSON spec; confirm prompts for `apiId`, server selection, optional token.
 2. Reload window; confirm the API survives reload and tools are visible in Copilot Chat agent mode.
 3. In Copilot Chat agent mode, ask the agent to discover and call a safe endpoint; then a `POST`; confirm the inline Continue/Cancel confirmation appears with redacted headers.
-4. Invoke an endpoint returning > 8 KB; confirm the tool result references a temp file instead of inlining.
+4. Invoke endpoints returning textual, image, and non-image binary payloads; confirm text bodies arrive whole, images as data parts, and binaries as spill-file references under workspace storage.
 
 ### Definition of Done
 

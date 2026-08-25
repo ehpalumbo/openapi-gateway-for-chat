@@ -8,6 +8,7 @@
 import type * as vscode from 'vscode';
 import type { ApiRegistry } from '../../store/registry';
 import type { TokenStore } from '../../store/secrets';
+import type { SpillStore } from '../spills';
 
 /**
  * The only token capability the invoke tool needs: reading a stored token.
@@ -22,6 +23,8 @@ export interface ToolContext {
 	registry: ApiRegistry;
 	/** Token store backing Bearer-authenticated invocations. */
 	tokens: TokenSource;
+	/** Spill-file store for non-image binary response bodies (R-RESP-3). */
+	spills: SpillStore;
 }
 
 /**

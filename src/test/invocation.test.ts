@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as http from 'http';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { parseSpec } from '../core/openapi';
@@ -9,9 +10,28 @@ import { ApiRegistration } from '../core/types';
 import { ApiRegistry } from '../store/registry';
 import { createInvokeOperationTool } from '../vscode/tools/invocation';
 import { registerGatewayTools } from '../vscode/tools';
+import { WorkspaceSpillStore } from '../vscode/spills';
 
 const FIXTURES = path.resolve(__dirname, '../../src/test/fixtures');
 const TOKEN = 's3cr3t-do-not-echo';
+
+/** Deterministic JSON payload large enough to exercise whole-body inlining. */
+const LARGE_REPORT = JSON.stringify({
+	items: Array.from({ length: 150 }, (_, i) => ({
+		id: i,
+		name: `item-${i}`,
+		description: 'd'.repeat(96),
+	})),
+});
+
+/** Smallest valid-enough PNG header block; only the content type matters. */
+const LOGO_PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01, 0x02, 0x03]);
+
+/** Minimal PDF-looking bytes; only the content type matters. */
+const REPORT_PDF = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3, 0xcf, 0xd3]);
+
+/** The exact small-JSON body served by the default route. */
+const SMALL_JSON = JSON.stringify({ id: 42, name: 'Rex' });
 
 interface RecordedRequest {
 	method: string;
@@ -44,25 +64,46 @@ class FakeMemento implements vscode.Memento {
 	}
 }
 
-async function invoke(name: string, input: Record<string, unknown>): Promise<unknown> {
+/**
+ * The uniform tool-result shape under test (R-RESP-1): part one is the
+ * response metadata as a text part ({status, statusLine, headers}); part two
+ * is the body — a text part for textual bodies and spill references, or an
+ * image data part for vision-safe image MIME types.
+ */
+interface InvokeOutcome {
+	metadata: { status?: number; statusLine?: string; headers?: Record<string, string> };
+	bodyText?: string;
+	imageDataPart?: vscode.LanguageModelDataPart;
+}
+
+async function invoke(name: string, input: Record<string, unknown>): Promise<InvokeOutcome> {
 	const result = await vscode.lm.invokeTool(
 		name,
 		{ input, toolInvocationToken: undefined },
 		new vscode.CancellationTokenSource().token
 	);
-	const part = result.content[0];
-	assert.ok(part instanceof vscode.LanguageModelTextPart, 'expected a single text part');
-	return JSON.parse((part as vscode.LanguageModelTextPart).value);
+	assert.strictEqual(result.content.length, 2, 'expected exactly two parts (metadata + body)');
+	assert.ok(result.content[0] instanceof vscode.LanguageModelTextPart, 'first part must be a text part');
+	const metadata = JSON.parse((result.content[0] as vscode.LanguageModelTextPart).value);
+	const bodyPart = result.content[1];
+	if (bodyPart instanceof vscode.LanguageModelTextPart) {
+		return { metadata, bodyText: bodyPart.value };
+	}
+	assert.ok(bodyPart instanceof vscode.LanguageModelDataPart, 'second part must be a text or image data part');
+	return { metadata, imageDataPart: bodyPart as vscode.LanguageModelDataPart };
 }
 
 /**
  * Drives `gateway_invoke_operation` end-to-end against an ephemeral local
  * HTTP server: the suite asserts the server receives exactly the request the
- * builder specified and that errors surface as structured results.
+ * builder specified, that errors surface as structured results, and that
+ * every HTTP response is served as uniform metadata + body data parts.
  */
 suite('Invocation flow', () => {
 	let registry: ApiRegistry;
 	let tokens: { setToken(apiId: string, token: string): Promise<void>; getToken(apiId: string): Promise<string | undefined> };
+	let spills: WorkspaceSpillStore;
+	let spillDir: string;
 	let server: http.Server;
 	let baseUrl: string;
 	let requests: RecordedRequest[];
@@ -84,13 +125,28 @@ suite('Invocation flow', () => {
 					res.end('kaboom');
 					return;
 				}
+				if (req.url === '/reports/large') {
+					res.writeHead(200, { 'content-type': 'application/json' });
+					res.end(LARGE_REPORT);
+					return;
+				}
+				if (req.url === '/logo.png') {
+					res.writeHead(200, { 'content-type': 'image/png' });
+					res.end(Buffer.from(LOGO_PNG));
+					return;
+				}
+				if (req.url === '/report.pdf') {
+					res.writeHead(200, { 'content-type': 'application/pdf' });
+					res.end(Buffer.from(REPORT_PDF));
+					return;
+				}
 				if (req.method === 'POST' && req.url === '/pets') {
 					res.writeHead(201, { 'content-type': 'application/json' });
 					res.end(Buffer.concat(chunks).toString('utf8'));
 					return;
 				}
 				res.writeHead(200, { 'content-type': 'application/json' });
-				res.end(JSON.stringify({ id: 42, name: 'Rex' }));
+				res.end(SMALL_JSON);
 			});
 		});
 		await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -114,25 +170,31 @@ suite('Invocation flow', () => {
 		};
 		registry = new ApiRegistry(new FakeMemento());
 		registry.upsert(registration);
-		registerGatewayTools({ registry, tokens });
+
+		// A real store over an isolated tmpdir exercises the production
+		// `workspace.fs` code paths while keeping workspace storage untouched.
+		const storageRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openapi-gateway-spills-'));
+		spillDir = path.join(storageRoot, 'response-spills');
+		spills = new WorkspaceSpillStore(vscode.Uri.file(storageRoot));
+
+		registerGatewayTools({ registry, tokens, spills });
 	});
 
 	suiteTeardown(async () => {
+		await spills.cleanup();
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
 
 	test('successful GET round-trip sends exactly the built request', async () => {
-		const payload = (await invoke('gateway_invoke_operation', {
+		const { metadata } = await invoke('gateway_invoke_operation', {
 			apiId: 'echo',
 			operationId: 'getPetById',
 			pathParams: { petId: 42 },
 			queryParams: { verbose: true },
 			headers: { 'X-Trace-Id': 't-100' },
-		})) as { status?: number; body?: { id: number; name: string }; error?: string };
+		});
 
-		assert.strictEqual(payload.error, undefined);
-		assert.strictEqual(payload.status, 200);
-		assert.deepStrictEqual(payload.body, { id: 42, name: 'Rex' });
+		assert.strictEqual(metadata.status, 200);
 
 		assert.strictEqual(requests.length, 1);
 		const seen = requests[0];
@@ -141,12 +203,77 @@ suite('Invocation flow', () => {
 		assert.strictEqual(seen.headers['x-trace-id'], 't-100');
 	});
 
-	test('missing required path param fails fast without any network traffic', async () => {
-		const before = requests.length;
-		const payload = (await invoke('gateway_invoke_operation', {
+	test('a small JSON response arrives as metadata plus a text part with the exact body', async () => {
+		const { metadata, bodyText } = await invoke('gateway_invoke_operation', {
 			apiId: 'echo',
 			operationId: 'getPetById',
-		})) as { error?: string; status?: number };
+			pathParams: { petId: 42 },
+		});
+
+		assert.strictEqual(metadata.status, 200);
+		assert.match(metadata.statusLine ?? '', /^200/);
+		assert.match(metadata.headers?.['content-type'] ?? '', /application\/json/);
+		assert.strictEqual(bodyText, SMALL_JSON);
+	});
+
+	test('a large JSON response is still served whole as text', async () => {
+		const { metadata, bodyText } = await invoke('gateway_invoke_operation', { apiId: 'echo', operationId: 'getLargeReport' });
+
+		assert.strictEqual(metadata.status, 200);
+		assert.strictEqual(bodyText, LARGE_REPORT);
+	});
+
+	test('a PNG response is served as an image data part with its MIME type', async () => {
+		const { metadata, imageDataPart, bodyText } = await invoke('gateway_invoke_operation', { apiId: 'echo', operationId: 'getLogo' });
+
+		assert.strictEqual(metadata.status, 200);
+		assert.strictEqual(bodyText, undefined);
+		assert.ok(imageDataPart instanceof vscode.LanguageModelDataPart, 'PNG bodies must be image data parts');
+		assert.strictEqual(imageDataPart.mimeType, 'image/png');
+		assert.deepStrictEqual(Array.from(imageDataPart.data), Array.from(LOGO_PNG));
+	});
+
+	test('a non-image binary response spills to an existing file referenced by path', async () => {
+		const first = await invoke('gateway_invoke_operation', { apiId: 'echo', operationId: 'getPdfReport' });
+		const second = await invoke('gateway_invoke_operation', { apiId: 'echo', operationId: 'getPdfReport' });
+
+		for (const outcome of [first, second]) {
+			assert.strictEqual(outcome.metadata.status, 200);
+			assert.match(outcome.metadata.headers?.['content-type'] ?? '', /application\/pdf/);
+			const spill = JSON.parse(outcome.bodyText ?? '{}') as {
+				contentType?: string;
+				byteSize?: number;
+				filePath?: string;
+				hint?: string;
+			};
+			assert.strictEqual(spill.contentType, 'application/pdf');
+			assert.strictEqual(spill.byteSize, REPORT_PDF.byteLength);
+			assert.match(spill.filePath ?? '', /\.pdf$/, 'PDF spills keep the .pdf extension');
+			assert.match(spill.hint ?? '', /open the file/i);
+			assert.ok(fs.existsSync(spill.filePath ?? ''), 'spilled file must exist on disk');
+			assert.deepStrictEqual(
+				new Uint8Array(fs.readFileSync(spill.filePath ?? '')),
+				REPORT_PDF,
+				'spilled bytes must match the served body'
+			);
+		}
+		const firstPath = JSON.parse(first.bodyText ?? '{}') as { filePath?: string };
+		const secondPath = JSON.parse(second.bodyText ?? '{}') as { filePath?: string };
+		assert.notStrictEqual(firstPath.filePath, secondPath.filePath, 'repeated spills must never override each other');
+	});
+
+	test('missing required path param fails fast without any network traffic', async () => {
+		const before = requests.length;
+		const result = await vscode.lm.invokeTool(
+			'gateway_invoke_operation',
+			{ input: { apiId: 'echo', operationId: 'getPetById' }, toolInvocationToken: undefined },
+			new vscode.CancellationTokenSource().token
+		);
+		assert.ok(result.content[0] instanceof vscode.LanguageModelTextPart, 'validation errors stay text results');
+		const payload = JSON.parse((result.content[0] as vscode.LanguageModelTextPart).value) as {
+			error?: string;
+			status?: number;
+		};
 
 		assert.match(payload.error ?? '', /petId/);
 		assert.match(payload.error ?? '', /required/i);
@@ -155,7 +282,7 @@ suite('Invocation flow', () => {
 	});
 
 	test('prepareInvocation confirms non-safe methods with URL and redacted auth, safe methods not at all', async () => {
-		const invokeTool = createInvokeOperationTool({ registry, tokens });
+		const invokeTool = createInvokeOperationTool({ registry, tokens, spills });
 
 		await tokens.setToken('echo', TOKEN);
 
@@ -187,27 +314,32 @@ suite('Invocation flow', () => {
 	});
 
 	test('stored token is attached as Bearer auth but never appears in the result', async () => {
-		const payload = (await invoke('gateway_invoke_operation', {
+		const { metadata } = await invoke('gateway_invoke_operation', {
 			apiId: 'echo',
 			operationId: 'getPetById',
 			pathParams: { petId: 42 },
-		})) as { status?: number };
+		});
 
-		assert.strictEqual(payload.status, 200);
+		assert.strictEqual(metadata.status, 200);
 		const last = requests[requests.length - 1];
 		assert.strictEqual(last.headers.authorization, `Bearer ${TOKEN}`);
-		assert.ok(!JSON.stringify(payload).includes(TOKEN), 'token must not leak into tool output');
+		assert.ok(!JSON.stringify(metadata).includes(TOKEN), 'token must not leak into tool output');
 	});
 
-	test('a 500 response yields a structured error result with status and body excerpt', async () => {
-		const payload = (await invoke('gateway_invoke_operation', {
-			apiId: 'echo',
-			operationId: 'detonate',
-		})) as { error?: string; url?: string; status?: number; bodyExcerpt?: string };
+	test('a 500 response follows the uniform shape: status in metadata, full error body as text', async () => {
+		const { metadata, bodyText } = await invoke('gateway_invoke_operation', { apiId: 'echo', operationId: 'detonate' });
 
-		assert.match(payload.error ?? '', /HTTP 500/);
-		assert.strictEqual(payload.status, 500);
-		assert.strictEqual(payload.url, `${baseUrl}/boom`);
-		assert.match(payload.bodyExcerpt ?? '', /kaboom/);
+		assert.strictEqual(metadata.status, 500);
+		assert.match(metadata.statusLine ?? '', /^500/);
+		assert.strictEqual(bodyText, 'kaboom');
+	});
+
+	test('cleanup removes every spilled file from the spill directory', async () => {
+		await invoke('gateway_invoke_operation', { apiId: 'echo', operationId: 'getPdfReport' });
+		assert.ok(fs.existsSync(spillDir) && fs.readdirSync(spillDir).length > 0, 'precondition: spills exist');
+
+		await spills.cleanup();
+
+		assert.ok(!fs.existsSync(spillDir) || fs.readdirSync(spillDir).length === 0, 'no spill files may remain');
 	});
 });

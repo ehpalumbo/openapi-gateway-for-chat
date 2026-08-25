@@ -51,6 +51,12 @@ class FakeMemento implements vscode.Memento {
 
 const noTokens = { getToken: () => Promise.resolve(undefined) };
 
+/** Discovery tools never spill; a stub keeps the required context shape. */
+const noSpills = {
+	write: async (fileName: string): Promise<string> => `/tmp/fake-spills/${fileName}`,
+	cleanup: async (): Promise<void> => undefined,
+};
+
 function catalogRegistration(apiId: string): ApiRegistration {
 	const document = parseSpec(readFixture('catalog30.json'));
 	return {
@@ -89,7 +95,7 @@ suite('Discovery flow', () => {
 
 	suiteSetup(() => {
 		registry = new ApiRegistry(new FakeMemento());
-		context = { registry, tokens: noTokens };
+		context = { registry, tokens: noTokens, spills: noSpills };
 		listApisTool = createListApisTool(context);
 		describeApiTool = createDescribeApiTool(context);
 		listOperationsTool = createListOperationsTool(context);
