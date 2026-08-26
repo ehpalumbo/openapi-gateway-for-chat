@@ -141,9 +141,6 @@
             },
             "pathParams": {
               "type": "object",
-              "propertyNames": {
-                "type": "string"
-              },
               "additionalProperties": {
                 "type": [
                   "string",
@@ -155,7 +152,15 @@
             },
             "queryParams": {
               "type": "object",
-              "additionalProperties": {},
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "array",
+                  "null"
+                ]
+              },
               "description": "Query parameter values; arrays become repeated keys."
             },
             "headers": {
@@ -163,24 +168,15 @@
               "additionalProperties": {
                 "type": "string"
               },
-              "description": "Extra request headers; Host and Authorization are reserved."
+              "description": "Extra request headers; Host, Authorization and Content-Length are reserved."
             },
             "body": {
-              "description": "Request body. Pass JSON bodies as an object or array (preferred) — e.g. {\"name\": \"Rex\"} or [{\"id\": 1}] — not as a stringified JSON string — e.g. \"{\\\"name\\\": \\\"Rex\\\"}\". Strings are sent verbatim without additional JSON stringification and are intended for raw text or pre-serialized payloads. Sent only when the operation declares a request body.",
-              "anyOf": [
-                {
-                  "type": "object",
-                  "description": "JSON object body — preferred for JSON payloads."
-                },
-                {
-                  "type": "array",
-                  "description": "JSON array body — for operations that accept array payloads."
-                },
-                {
-                  "type": "string",
-                  "description": "Raw string body — sent verbatim without JSON stringification. Use for plain text or when you already have a serialized payload; JSON bodies should prefer object/array."
-                }
-              ]
+              "type": [
+                "object",
+                "array",
+                "string"
+              ],
+              "description": "Request body. Pass JSON bodies as object or array. Strings are sent verbatim for raw text. Sent only when the operation declares a request body. MUST be object/array for JSON; DO NOT stringify or pass JSON as a string."
             }
           },
           "required": [

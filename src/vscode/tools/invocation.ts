@@ -21,7 +21,7 @@
  * consumed directly without runtime coercion.
  */
 import * as vscode from 'vscode';
-import { buildRequest, RequestBuildError } from '../../core/request-builder';
+import { buildRequest, HeaderValue, PathParamValue, QueryParamValue, RequestBuildError } from '../../core/request-builder';
 import { buildSpillFileName, isSupportedImageContentType, isTextContentType } from '../../core/response-handler';
 import { OperationInfo } from '../../core/types';
 import { RegistryEntry } from '../../store/registry';
@@ -50,9 +50,9 @@ const DEFAULT_MIME_TYPE = 'application/octet-stream';
 export interface InvokeOperationInput {
 	apiId: string;
 	operationId: string;
-	pathParams?: Record<string, string | number | boolean>;
-	queryParams?: Record<string, unknown>;
-	headers?: Record<string, string>;
+	pathParams?: Record<string, PathParamValue>;
+	queryParams?: Record<string, QueryParamValue>;
+	headers?: Record<string, HeaderValue>;
 	body?: Record<string, unknown> | unknown[] | string;
 }
 

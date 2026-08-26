@@ -9,17 +9,26 @@
  */
 import { ApiRegistration, OperationInfo } from './types';
 
+/** Scalar value accepted for path placeholders; always stringified and URL-encoded. */
+export type PathParamValue = string | number | boolean;
+
+/** Scalar or repeated value accepted for query keys; always stringified. `null` is ignored (matches runtime `hasValue` drop). */
+export type QueryParamValue = string | number | boolean | null | Array<string | number | boolean | null>;
+
+/** Header values are always strings on the wire. */
+export type HeaderValue = string;
+
 /**
  * Agent-supplied values for one invocation, mirroring the
  * `gateway_invoke_operation` input schema (R-INV-2).
  */
 export interface InvokeInput {
 	/** Values for `{name}` placeholders in the path template. */
-	pathParams?: Record<string, unknown>;
+	pathParams?: Record<string, PathParamValue>;
 	/** Query-string values; arrays serialize as repeated keys. */
-	queryParams?: Record<string, unknown>;
+	queryParams?: Record<string, QueryParamValue>;
 	/** Extra request headers merged under spec-declared header parameters. */
-	headers?: Record<string, unknown>;
+	headers?: Record<string, HeaderValue>;
 	/** Request body: JSON object/array (preferred) or raw string sent verbatim. */
 	body?: Record<string, unknown> | unknown[] | string;
 }
@@ -60,17 +69,33 @@ export function buildRequest(reg: ApiRegistration, op: OperationInfo, input: Inv
 	const base = reg.baseUrl.replace(/\/+$/, '');
 	const pathParams = requirePathParams(op, record(input.pathParams));
 	const url = buildTargetUrl(base, op.pathTemplate, pathParams, record(input.queryParams));
-	const headers = collectHeaders(op, base, pathParams, record(input.headers));
-	const serializedBody = serializeBody(input.body);
-	const contentType = resolveContentType(input.body, op, headers);
-	return finalizeRequest(op.method, url, headers, serializedBody, contentType);
+	const headers = collectHeaders(op, base, record(input.headers));
+	if (op.requestBody && op.requestBody.required && !input.body) {
+		throw new RequestBuildError(
+			`Missing required request body. Provide a non-empty value for the request body of operation ` +
+			`"${op.operationId}" (${op.method.toUpperCase()} ${op.pathTemplate}).`
+		);
+	}
+	if (hasValue(input.body) && !hasHeader('Content-Type', headers)) {
+		const contentType = resolveContentType(input.body, op);
+		if (contentType) {
+			headers['Content-Type'] = contentType;
+		}
+	}
+	const body = serializeBody(input.body);
+	return {
+		method: op.method.toUpperCase(),
+		url: url.toString(),
+		headers,
+		...(body !== undefined ? { body } : {}),
+	};
 }
 
 /**
  * Verifies every required path parameter has a non-empty value (R-INV-3) and
  * returns the coerced record for downstream substitution.
  */
-function requirePathParams(op: OperationInfo, provided: Record<string, unknown>): Record<string, unknown> {
+function requirePathParams(op: OperationInfo, provided: Record<string, PathParamValue>): Record<string, PathParamValue> {
 	const missing = op.parameters
 		.filter((parameter) => parameter.in === 'path' && !isFilled(provided[parameter.name]))
 		.map((parameter) => parameter.name);
@@ -88,8 +113,8 @@ function requirePathParams(op: OperationInfo, provided: Record<string, unknown>)
 function buildTargetUrl(
 	base: string,
 	pathTemplate: string,
-	pathParams: Record<string, unknown>,
-	queryParams: Record<string, unknown>
+	pathParams: Record<string, PathParamValue>,
+	queryParams: Record<string, QueryParamValue>
 ): URL {
 	let path = substitutePathTemplate(pathTemplate, pathParams);
 	if (!path.startsWith('/')) {
@@ -100,12 +125,12 @@ function buildTargetUrl(
 	return url;
 }
 
-function substitutePathTemplate(pathTemplate: string, pathParams: Record<string, unknown>): string {
-	return pathTemplate.replace(/\{([^}]+)\}/g, (_, name: string) => encodeURIComponent(stringify(pathParams[name])));
+function substitutePathTemplate(pathTemplate: string, pathParams: Record<string, PathParamValue>): string {
+	return pathTemplate.replace(/\{([^}]+)\}/g, (_, name: string) => encodeURIComponent(stringify(pathParams[name] as PathParamValue)));
 }
 
 /** Serializes query values: scalars as single keys, arrays as repeated keys. */
-function serializeQuery(queryParams: Record<string, unknown>): string {
+function serializeQuery(queryParams: Record<string, QueryParamValue>): string {
 	const searchParams = new URLSearchParams();
 	for (const [key, value] of Object.entries(queryParams)) {
 		appendQueryValues(searchParams, key, value);
@@ -120,19 +145,24 @@ function serializeQuery(queryParams: Record<string, unknown>): string {
 function collectHeaders(
 	op: OperationInfo,
 	base: string,
-	pathParams: Record<string, unknown>,
-	userHeaders: Record<string, unknown>
+	userHeaders: Record<string, HeaderValue>
 ): Record<string, string> {
 	const headers: Record<string, string> = {};
-	for (const parameter of op.parameters) {
-		if (parameter.in === 'header' && hasValue(pathParams[parameter.name])) {
-			headers[parameter.name] = stringify(pathParams[parameter.name]);
-		}
-	}
 	for (const [key, value] of Object.entries(userHeaders)) {
 		assertHeaderAllowed(key, base);
 		if (hasValue(value)) {
 			headers[key] = stringify(value);
+		}
+	}
+	if (op.parameters) {
+		for (const parameter of op.parameters) {
+			if (parameter.in === 'header' && parameter.required && !hasHeader(parameter.name, headers)) {
+				throw new RequestBuildError(
+					`Missing required header parameter "${parameter.name}". ` +
+					`Provide a non-empty value for each required header parameter of operation "${op.operationId}" ` +
+					`(${op.method.toUpperCase()} ${op.pathTemplate}).`
+				);
+			}
 		}
 	}
 	return headers;
@@ -158,41 +188,15 @@ function serializeBody(body: Record<string, unknown> | unknown[] | string | unde
 	return JSON.stringify(body);
 }
 
-function finalizeRequest(
-	method: string,
-	url: URL,
-	headers: Record<string, string>,
-	body?: string,
-	contentType?: string
-): BuiltRequest {
-	const effectiveHeaders = { ...headers };
-	if (body !== undefined && contentType !== undefined) {
-		effectiveHeaders['Content-Type'] = contentType;
-	}
-	return {
-		method: method.toUpperCase(),
-		url: url.toString(),
-		headers: effectiveHeaders,
-		...(body !== undefined ? { body } : {}),
-	};
-}
-
-function hasHeader(headers: Record<string, string>, name: string): boolean {
+function hasHeader(name: string, headers: Record<string, string>): boolean {
 	const lower = name.toLowerCase();
 	return Object.keys(headers).some((key) => key.toLowerCase() === lower);
 }
 
 function resolveContentType(
-	body: Record<string, unknown> | unknown[] | string | undefined,
+	body: Record<string, unknown> | unknown[] | string,
 	op: OperationInfo,
-	headers: Record<string, string>
 ): string | undefined {
-	if (!hasValue(body)) {
-		return undefined;
-	}
-	if (hasHeader(headers, 'content-type')) {
-		return undefined;
-	}
 	if (typeof body === 'string') {
 		const declared = op.requestBody?.content ? Object.keys(op.requestBody.content)[0] : undefined;
 		if (declared) {
@@ -215,11 +219,11 @@ function resolveContentType(
 	return 'application/json';
 }
 
-function record(value: unknown): Record<string, unknown> {
-	return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+function record<T>(value: Record<string, T> | undefined): Record<string, T> {
+	return typeof value === 'object' && value !== null ? (value as Record<string, T>) : {} as Record<string, T>;
 }
 
-function hasValue(value: unknown): boolean {
+function hasValue(value: unknown): value is NonNullable<unknown> {
 	return value !== undefined && value !== null;
 }
 
@@ -228,11 +232,11 @@ function isFilled(value: unknown): boolean {
 	return hasValue(value) && !(typeof value === 'string' && value.length === 0);
 }
 
-function stringify(value: unknown): string {
+function stringify(value: string | number | boolean): string {
 	return typeof value === 'string' ? value : String(value);
 }
 
-function appendQueryValues(searchParams: URLSearchParams, key: string, value: unknown): void {
+function appendQueryValues(searchParams: URLSearchParams, key: string, value: QueryParamValue): void {
 	if (!hasValue(value)) {
 		return;
 	}
