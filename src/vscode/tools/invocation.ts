@@ -224,7 +224,7 @@ async function serveResponse(
 	const bytes = new Uint8Array(await response.arrayBuffer());
 	const mimeType = headers['content-type'] ?? DEFAULT_MIME_TYPE;
 	const baseMimeType = mimeType.split(';')[0].trim().toLowerCase();
-	const metadataPart = new vscode.LanguageModelTextPart(JSON.stringify({ status: response.status, statusLine, headers }, null, 2));
+	const metadataPart = new vscode.LanguageModelTextPart(JSON.stringify({ status: response.status, statusLine, headers }, null, 2) + '\n');
 
 	if (isSupportedImageContentType(baseMimeType)) {
 		return new vscode.LanguageModelToolResult([metadataPart, new vscode.LanguageModelDataPart(bytes, baseMimeType)]);
