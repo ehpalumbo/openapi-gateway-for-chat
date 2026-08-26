@@ -66,14 +66,37 @@ class FakeMemento implements vscode.Memento {
 
 /**
  * The uniform tool-result shape under test (R-RESP-1): part one is the
- * response metadata as a text part ({status, statusLine, headers}); part two
- * is the body — a text part for textual bodies and spill references, or an
- * image data part for vision-safe image MIME types.
+ * response metadata as plain text mimicking the raw HTTP head (bare status
+ * line, headers in arrival order lower-case, blank line — `statusLine\nh: v\n\n`);
+ * part two is the body — a text part for textual bodies and spill references,
+ * or an image data part for vision-safe image MIME types.
  */
 interface InvokeOutcome {
 	metadata: { status?: number; statusLine?: string; headers?: Record<string, string> };
+	rawMetadata: string;
 	bodyText?: string;
 	imageDataPart?: vscode.LanguageModelDataPart;
+}
+
+function parseResponseHead(text: string): { status?: number; statusLine?: string; headers?: Record<string, string> } {
+	const lines = text.split('\n');
+	const statusLine = lines[0] ?? '';
+	const headers: Record<string, string> = {};
+	for (let i = 1; i < lines.length; i++) {
+		const line = lines[i];
+		if (line === '') {
+			break;
+		}
+		const colon = line.indexOf(':');
+		if (colon === -1) {
+			continue;
+		}
+		const key = line.slice(0, colon).trim().toLowerCase();
+		const value = line.slice(colon + 1).trim();
+		headers[key] = value;
+	}
+	const status = statusLine ? parseInt(statusLine.split(' ')[0] ?? '', 10) : undefined;
+	return { status: Number.isNaN(status) ? undefined : status, statusLine, headers };
 }
 
 async function invoke(name: string, input: Record<string, unknown>): Promise<InvokeOutcome> {
@@ -84,13 +107,15 @@ async function invoke(name: string, input: Record<string, unknown>): Promise<Inv
 	);
 	assert.strictEqual(result.content.length, 2, 'expected exactly two parts (metadata + body)');
 	assert.ok(result.content[0] instanceof vscode.LanguageModelTextPart, 'first part must be a text part');
-	const metadata = JSON.parse((result.content[0] as vscode.LanguageModelTextPart).value);
+	const rawMetadata = (result.content[0] as vscode.LanguageModelTextPart).value;
+	assert.ok(rawMetadata.endsWith('\n\n'), 'metadata must end with blank line (statusLine\\nheaders\\n\\n)');
+	const metadata = parseResponseHead(rawMetadata);
 	const bodyPart = result.content[1];
 	if (bodyPart instanceof vscode.LanguageModelTextPart) {
-		return { metadata, bodyText: bodyPart.value };
+		return { metadata, rawMetadata, bodyText: bodyPart.value };
 	}
 	assert.ok(bodyPart instanceof vscode.LanguageModelDataPart, 'second part must be a text or image data part');
-	return { metadata, imageDataPart: bodyPart as vscode.LanguageModelDataPart };
+	return { metadata, rawMetadata, imageDataPart: bodyPart as vscode.LanguageModelDataPart };
 }
 
 /**
@@ -314,7 +339,7 @@ suite('Invocation flow', () => {
 	});
 
 	test('stored token is attached as Bearer auth but never appears in the result', async () => {
-		const { metadata } = await invoke('gateway_invoke_operation', {
+		const { metadata, rawMetadata } = await invoke('gateway_invoke_operation', {
 			apiId: 'echo',
 			operationId: 'getPetById',
 			pathParams: { petId: 42 },
@@ -323,7 +348,7 @@ suite('Invocation flow', () => {
 		assert.strictEqual(metadata.status, 200);
 		const last = requests[requests.length - 1];
 		assert.strictEqual(last.headers.authorization, `Bearer ${TOKEN}`);
-		assert.ok(!JSON.stringify(metadata).includes(TOKEN), 'token must not leak into tool output');
+		assert.ok(!rawMetadata.includes(TOKEN) && !JSON.stringify(metadata).includes(TOKEN), 'token must not leak into tool output');
 	});
 
 	test('a 500 response follows the uniform shape: status in metadata, full error body as text', async () => {

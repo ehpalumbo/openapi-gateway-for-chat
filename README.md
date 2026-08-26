@@ -18,7 +18,7 @@ The extension is therefore a **convenience layer**: no external processes, no ex
 - **Invocation tool**: `gateway_invoke_operation` with structured tool input validation against the spec.
 - **Safe by default**: non-safe HTTP methods require explicit user confirmation before each call, with redacted headers and a body preview.
 - **Static Bearer-token auth**, stored securely in VS Code SecretStorage.
-- **Uniform response serving**: every HTTP response arrives as two parts — JSON metadata (status, status line, headers) plus the body routed by content type.
+- **Uniform response serving**: every HTTP response arrives as two parts — plain-text metadata (raw HTTP head: bare status line, headers, blank line) plus the body routed by content type.
 
 See [docs/index.md](docs/index.md) for the full software specification.
 
@@ -56,7 +56,7 @@ Agents see five tools (names as contributed):
 
 Every response carrying an HTTP status is returned as exactly two tool-result parts:
 
-1. **Metadata** — a text part containing JSON `{ status, statusLine, headers }`, so the model can read the status code and headers directly.
+1. **Metadata** — a text part containing the raw HTTP head as plain text — bare status line (`200 OK`), headers in arrival order as `key: value` (lower-case as returned by `fetch()`), then a blank line (`statusLine\nheaders\n\n`) — so the model can read the status code and headers directly.
 2. **Body** — routed by content type:
    - Textual types (`text/*`, `application/json`, `+json`): a text part with the UTF-8 body, served whole.
    - Vision-safe images (`image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/bmp`): an image `LanguageModelDataPart`.

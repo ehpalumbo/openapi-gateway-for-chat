@@ -7,14 +7,15 @@
  * returned as structured results instead of throwing so the model can reason
  * about retry or correction (R-INV-5). Every response carrying an HTTP status
  * is served as a uniform two-part result (R-RESP-1): a metadata text part
- * ({status, statusLine, headers}) followed by the body. Bodies are routed by
- * content type (R-RESP-3): textual ones as a text part with the UTF-8 body,
- * vision-safe images as an image `LanguageModelDataPart`, and non-image
- * binaries spilled to disk under `<storageUri>/response-spills/` with a text
- * part referencing the absolute path — Copilot only forwards text parts and
- * image data parts from tool results into the model prompt (see
- * microsoft/vscode#275300). Only failures without a status — network errors —
- * fall back to a plain single-text result.
+ * with the raw HTTP head (bare status line, headers in arrival order, blank
+ * line — e.g. `200 OK\ncontent-type: application/json\n\n`) followed by the
+ * body. Bodies are routed by content type (R-RESP-3): textual ones as a text
+ * part with the UTF-8 body, vision-safe images as an image
+ * `LanguageModelDataPart`, and non-image binaries spilled to disk under
+ * `<storageUri>/response-spills/` with a text part referencing the absolute
+ * path — Copilot only forwards text parts and image data parts from tool
+ * results into the model prompt (see microsoft/vscode#275300). Only failures
+ * without a status — network errors — fall back to a plain single-text result.
  *
  * The host validates `options.input` against the `inputSchema` declared in
  * package.json before dispatching (`vscode.d.ts:21166`), so inputs are
@@ -209,9 +210,10 @@ async function executeOperation(
 
 /**
  * Serves any response that carries an HTTP status as a uniform two-part
- * result (R-RESP-1): a metadata text part first, then the body routed by
- * content type (R-RESP-3). Non-2xx statuses are not special-cased — the
- * model reads the status from the metadata part.
+ * result (R-RESP-1): a metadata text part first (raw HTTP head: bare status
+ * line, headers, blank line), then the body routed by content type
+ * (R-RESP-3). Non-2xx statuses are not special-cased — the model reads the
+ * status from the metadata part.
  */
 async function serveResponse(
 	entry: RegistryEntry,
@@ -224,7 +226,7 @@ async function serveResponse(
 	const bytes = new Uint8Array(await response.arrayBuffer());
 	const mimeType = headers['content-type'] ?? DEFAULT_MIME_TYPE;
 	const baseMimeType = mimeType.split(';')[0].trim().toLowerCase();
-	const metadataPart = new vscode.LanguageModelTextPart(JSON.stringify({ status: response.status, statusLine, headers }, null, 2) + '\n');
+	const metadataPart = new vscode.LanguageModelTextPart(formatResponseHead(statusLine, headers));
 
 	if (isSupportedImageContentType(baseMimeType)) {
 		return new vscode.LanguageModelToolResult([metadataPart, new vscode.LanguageModelDataPart(bytes, baseMimeType)]);
@@ -272,6 +274,19 @@ function headersToRecord(headers: Headers): Record<string, string> {
 		record[key] = value;
 	});
 	return record;
+}
+
+/**
+ * Formats the metadata head as plain text mirroring the raw HTTP response:
+ * bare status line, headers in arrival order (lower-case as returned by
+ * fetch()), then a blank line. Example: `200 OK\ncontent-type: application/json\n\n`.
+ */
+function formatResponseHead(statusLine: string, headers: Record<string, string>): string {
+	const lines = [statusLine];
+	for (const [key, value] of Object.entries(headers)) {
+		lines.push(`${key}: ${value}`);
+	}
+	return lines.join('\n') + '\n\n';
 }
 
 /** Injects the stored Bearer token; the value is never logged or echoed (NFR-1). */
