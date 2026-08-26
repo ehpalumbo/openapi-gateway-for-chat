@@ -20,8 +20,8 @@ export interface InvokeInput {
 	queryParams?: Record<string, unknown>;
 	/** Extra request headers merged under spec-declared header parameters. */
 	headers?: Record<string, unknown>;
-	/** JSON body sent when the operation declares a request body. */
-	body?: unknown;
+	/** Request body: JSON object/array (preferred) or raw string sent verbatim. */
+	body?: Record<string, unknown> | unknown[] | string;
 }
 
 /**
@@ -145,9 +145,15 @@ function assertHeaderAllowed(key: string, base: string): void {
 	}
 }
 
-/** Serializes the body as JSON; returns `undefined` when none was supplied. */
-function serializeBody(body: unknown): string | undefined {
-	return hasValue(body) ? JSON.stringify(body) : undefined;
+/** Serializes the body as JSON; strings are sent verbatim, returns `undefined` when none was supplied. */
+function serializeBody(body: Record<string, unknown> | unknown[] | string | undefined): string | undefined {
+	if (!hasValue(body)) {
+		return undefined;
+	}
+	if (typeof body === 'string') {
+		return body;
+	}
+	return JSON.stringify(body);
 }
 
 function finalizeRequest(method: string, url: URL, headers: Record<string, string>, body?: string): BuiltRequest {

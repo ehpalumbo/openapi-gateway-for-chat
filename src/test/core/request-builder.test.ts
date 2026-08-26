@@ -148,9 +148,54 @@ suite('Request builder', () => {
 		});
 		const request = buildRequest(registration('https://api.example.com/v1'), op, {
 			body: { name: 'Rex' },
-		} satisfies InvokeInput & { body?: unknown });
+		} satisfies InvokeInput);
 		assert.strictEqual(request.method, 'POST');
 		assert.strictEqual(request.body, '{"name":"Rex"}');
+		assert.strictEqual(request.headers['Content-Type'], 'application/json');
+	});
+
+	test('array body is JSON-stringified', () => {
+		const op = operation({
+			method: 'post',
+			pathTemplate: '/pets/batch',
+			parameters: [],
+			requestBody: { required: true, content: { 'application/json': { schema: { type: 'array' } } } },
+		});
+		const request = buildRequest(registration('https://api.example.com/v1'), op, {
+			body: [{ name: 'Rex' }, { name: 'Fido' }],
+		} satisfies InvokeInput);
+		assert.strictEqual(request.body, '[{"name":"Rex"},{"name":"Fido"}]');
+		assert.strictEqual(request.headers['Content-Type'], 'application/json');
+	});
+
+	test('string body is sent verbatim without JSON stringification', () => {
+		const op = operation({
+			method: 'post',
+			pathTemplate: '/pets',
+			parameters: [],
+			requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+		});
+		const rawJson = '{"name":"Rex"}';
+		const request = buildRequest(registration('https://api.example.com/v1'), op, {
+			body: rawJson,
+		} satisfies InvokeInput);
+		assert.strictEqual(request.body, rawJson);
+		// Must NOT be double-stringified: '"{\\"name\\":\\"Rex\\"}"'
+		assert.notStrictEqual(request.body, JSON.stringify(rawJson));
+		assert.strictEqual(request.headers['Content-Type'], 'application/json');
+	});
+
+	test('plain text string body is sent verbatim', () => {
+		const op = operation({
+			method: 'post',
+			pathTemplate: '/pets',
+			parameters: [],
+			requestBody: { required: true, content: { 'text/plain': { schema: { type: 'string' } } } },
+		});
+		const request = buildRequest(registration('https://api.example.com/v1'), op, {
+			body: 'hello world',
+		} satisfies InvokeInput);
+		assert.strictEqual(request.body, 'hello world');
 		assert.strictEqual(request.headers['Content-Type'], 'application/json');
 	});
 

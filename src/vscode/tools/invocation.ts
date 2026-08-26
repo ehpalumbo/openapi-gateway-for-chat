@@ -53,7 +53,7 @@ export interface InvokeOperationInput {
 	pathParams?: Record<string, string | number | boolean>;
 	queryParams?: Record<string, unknown>;
 	headers?: Record<string, string>;
-	body?: unknown;
+	body?: Record<string, unknown> | unknown[] | string;
 }
 
 /** An operation resolved together with its registration's runtime view. */
