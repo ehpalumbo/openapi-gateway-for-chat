@@ -61,7 +61,9 @@ export function buildRequest(reg: ApiRegistration, op: OperationInfo, input: Inv
 	const pathParams = requirePathParams(op, record(input.pathParams));
 	const url = buildTargetUrl(base, op.pathTemplate, pathParams, record(input.queryParams));
 	const headers = collectHeaders(op, base, pathParams, record(input.headers));
-	return finalizeRequest(op.method, url, headers, serializeBody(input.body));
+	const serializedBody = serializeBody(input.body);
+	const contentType = resolveContentType(input.body, op, headers);
+	return finalizeRequest(op.method, url, headers, serializedBody, contentType);
 }
 
 /**
@@ -156,10 +158,16 @@ function serializeBody(body: Record<string, unknown> | unknown[] | string | unde
 	return JSON.stringify(body);
 }
 
-function finalizeRequest(method: string, url: URL, headers: Record<string, string>, body?: string): BuiltRequest {
+function finalizeRequest(
+	method: string,
+	url: URL,
+	headers: Record<string, string>,
+	body?: string,
+	contentType?: string
+): BuiltRequest {
 	const effectiveHeaders = { ...headers };
-	if (body !== undefined) {
-		effectiveHeaders['Content-Type'] = 'application/json';
+	if (body !== undefined && contentType !== undefined) {
+		effectiveHeaders['Content-Type'] = contentType;
 	}
 	return {
 		method: method.toUpperCase(),
@@ -167,6 +175,44 @@ function finalizeRequest(method: string, url: URL, headers: Record<string, strin
 		headers: effectiveHeaders,
 		...(body !== undefined ? { body } : {}),
 	};
+}
+
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+	const lower = name.toLowerCase();
+	return Object.keys(headers).some((key) => key.toLowerCase() === lower);
+}
+
+function resolveContentType(
+	body: Record<string, unknown> | unknown[] | string | undefined,
+	op: OperationInfo,
+	headers: Record<string, string>
+): string | undefined {
+	if (!hasValue(body)) {
+		return undefined;
+	}
+	if (hasHeader(headers, 'content-type')) {
+		return undefined;
+	}
+	if (typeof body === 'string') {
+		const declared = op.requestBody?.content ? Object.keys(op.requestBody.content)[0] : undefined;
+		if (declared) {
+			return declared;
+		}
+		const trimmed = body.trim();
+		if (
+			(trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+			(trimmed.startsWith('[') && trimmed.endsWith(']'))
+		) {
+			try {
+				JSON.parse(trimmed);
+				return 'application/json';
+			} catch {
+				// not valid JSON — fall through to text/plain
+			}
+		}
+		return 'text/plain';
+	}
+	return 'application/json';
 }
 
 function record(value: unknown): Record<string, unknown> {

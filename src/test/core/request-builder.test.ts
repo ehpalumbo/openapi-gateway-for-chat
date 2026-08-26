@@ -185,7 +185,7 @@ suite('Request builder', () => {
 		assert.strictEqual(request.headers['Content-Type'], 'application/json');
 	});
 
-	test('plain text string body is sent verbatim', () => {
+	test('plain text string body is sent verbatim with text/plain Content-Type', () => {
 		const op = operation({
 			method: 'post',
 			pathTemplate: '/pets',
@@ -196,7 +196,61 @@ suite('Request builder', () => {
 			body: 'hello world',
 		} satisfies InvokeInput);
 		assert.strictEqual(request.body, 'hello world');
-		assert.strictEqual(request.headers['Content-Type'], 'application/json');
+		assert.strictEqual(request.headers['Content-Type'], 'text/plain');
+	});
+
+	test('string body Content-Type is inferred from declared spec when available', () => {
+		const op = operation({
+			method: 'post',
+			pathTemplate: '/pets',
+			parameters: [],
+			requestBody: { required: true, content: { 'application/xml': { schema: { type: 'string' } } } },
+		});
+		const request = buildRequest(registration('https://api.example.com/v1'), op, {
+			body: '<pet><name>Rex</name></pet>',
+		} satisfies InvokeInput);
+		assert.strictEqual(request.body, '<pet><name>Rex</name></pet>');
+		assert.strictEqual(request.headers['Content-Type'], 'application/xml');
+	});
+
+	test('user-supplied Content-Type header is not overwritten', () => {
+		const op = operation({
+			method: 'post',
+			pathTemplate: '/pets',
+			parameters: [],
+			requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+		});
+		const request = buildRequest(registration('https://api.example.com/v1'), op, {
+			body: { name: 'Rex' },
+			headers: { 'Content-Type': 'application/custom+json' },
+		} satisfies InvokeInput);
+		assert.strictEqual(request.body, '{"name":"Rex"}');
+		assert.strictEqual(request.headers['Content-Type'], 'application/custom+json');
+
+		const stringReq = buildRequest(registration('https://api.example.com/v1'), op, {
+			body: '{"name":"Rex"}',
+			headers: { 'content-type': 'text/plain' },
+		} satisfies InvokeInput);
+		assert.strictEqual(stringReq.body, '{"name":"Rex"}');
+		assert.strictEqual(stringReq.headers['content-type'], 'text/plain');
+		assert.strictEqual('Content-Type' in stringReq.headers, false);
+	});
+
+	test('string JSON without declared spec infers application/json, non-JSON infers text/plain', () => {
+		const opNoSpec = operation({
+			method: 'post',
+			pathTemplate: '/raw',
+			parameters: [],
+		});
+		const jsonReq = buildRequest(registration('https://api.example.com/v1'), opNoSpec, {
+			body: '{"a":1}',
+		} satisfies InvokeInput);
+		assert.strictEqual(jsonReq.headers['Content-Type'], 'application/json');
+
+		const textReq = buildRequest(registration('https://api.example.com/v1'), opNoSpec, {
+			body: 'hello world',
+		} satisfies InvokeInput);
+		assert.strictEqual(textReq.headers['Content-Type'], 'text/plain');
 	});
 
 	test('no body is set when the caller supplies none', () => {
