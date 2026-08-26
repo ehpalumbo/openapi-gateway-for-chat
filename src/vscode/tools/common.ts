@@ -1,6 +1,6 @@
 /**
- * Helpers shared by the gateway tool implementations: input coercion and the
- * uniform single-text-part tool-result shapes (spec §4).
+ * Helpers shared by the gateway tool implementations: the uniform
+ * single-text-part tool-result shapes (spec §4) and registry lookup.
  */
 import * as vscode from 'vscode';
 import { ApiRegistry, RegistryEntry } from '../../store/registry';
@@ -11,15 +11,6 @@ export function textResult(payload: unknown): vscode.LanguageModelToolResult {
 
 export function errorResult(message: string): vscode.LanguageModelToolResult {
 	return textResult({ error: message });
-}
-
-export function asRecord(input: unknown): Record<string, unknown> {
-	return typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {};
-}
-
-export function readString(input: Record<string, unknown>, key: string): string | undefined {
-	const value = input[key];
-	return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 export function noApisRegistered(): vscode.LanguageModelToolResult {

@@ -15,14 +15,18 @@
  * image data parts from tool results into the model prompt (see
  * microsoft/vscode#275300). Only failures without a status — network errors —
  * fall back to a plain single-text result.
+ *
+ * The host validates `options.input` against the `inputSchema` declared in
+ * package.json before dispatching (`vscode.d.ts:21166`), so inputs are
+ * consumed directly without runtime coercion.
  */
 import * as vscode from 'vscode';
-import { buildRequest, InvokeInput, RequestBuildError } from '../../core/request-builder';
+import { buildRequest, RequestBuildError } from '../../core/request-builder';
 import { buildSpillFileName, isSupportedImageContentType, isTextContentType } from '../../core/response-handler';
 import { OperationInfo } from '../../core/types';
 import { RegistryEntry } from '../../store/registry';
 import { randomToken } from '../spills';
-import { asRecord, errorResult, isFailure, readString, resolveEntry, textResult } from './common';
+import { errorResult, isFailure, resolveEntry, textResult } from './common';
 import { ToolContext } from './context';
 
 /** Methods that never mutate state and therefore skip confirmation (R-SAFE-1). */
@@ -38,6 +42,20 @@ const EXCERPT_LIMIT = 1000;
 /** MIME type assumed when the server does not declare one. */
 const DEFAULT_MIME_TYPE = 'application/octet-stream';
 
+/**
+ * The input shape for the `gateway_invoke_operation` tool. The host validates
+ * `options.input` against the `inputSchema` declared in package.json before
+ * dispatching, so handlers can consume `options.input` directly.
+ */
+export interface InvokeOperationInput {
+	apiId: string;
+	operationId: string;
+	pathParams?: Record<string, string | number | boolean>;
+	queryParams?: Record<string, unknown>;
+	headers?: Record<string, string>;
+	body?: unknown;
+}
+
 /** An operation resolved together with its registration's runtime view. */
 interface ResolvedOperation {
 	entry: RegistryEntry;
@@ -49,20 +67,16 @@ interface ResolvedOperation {
  * HTTP request against a registered base URL with Bearer-token injection and
  * native safety confirmation (R-SAFE-*).
  */
-export function createInvokeOperationTool(context: ToolContext): vscode.LanguageModelTool<unknown> {
+export function createInvokeOperationTool(context: ToolContext): vscode.LanguageModelTool<InvokeOperationInput> {
 	return {
-		prepareInvocation: ({ input }) => prepareInvocation(context, asRecord(input)),
-		invoke: ({ input }) => invokeOperation(context, asRecord(input)),
+		prepareInvocation: ({ input }) => prepareInvocation(context, input),
+		invoke: ({ input }) => invokeOperation(context, input),
 	};
 }
 
-/**
- * Decides whether the host must prompt before execution. Unknown inputs bail
- * out silently: `invoke` reports them as structured errors afterwards.
- */
 async function prepareInvocation(
 	context: ToolContext,
-	input: Record<string, unknown>
+	input: InvokeOperationInput
 ): Promise<vscode.PreparedToolInvocation | undefined> {
 	const resolved = resolveSilently(context.registry, input);
 	if (!resolved || !shouldConfirm(resolved.operation)) {
@@ -71,14 +85,15 @@ async function prepareInvocation(
 	return buildConfirmation(resolved.entry, resolved.operation, input, context);
 }
 
-function resolveSilently(registry: ToolContext['registry'], input: Record<string, unknown>): ResolvedOperation | undefined {
-	const apiId = readString(input, 'apiId');
-	const operationId = readString(input, 'operationId');
-	if (!apiId || !operationId || registry.list().length === 0) {
+function resolveSilently(
+	registry: ToolContext['registry'],
+	input: InvokeOperationInput
+): ResolvedOperation | undefined {
+	if (registry.list().length === 0) {
 		return undefined;
 	}
-	const entry = registry.getEntry(apiId);
-	const operation = entry?.index.get(operationId);
+	const entry = registry.getEntry(input.apiId);
+	const operation = entry?.index.get(input.operationId);
 	if (!entry || !operation) {
 		return undefined;
 	}
@@ -96,12 +111,12 @@ function shouldConfirm(operation: OperationInfo): boolean {
 async function buildConfirmation(
 	entry: RegistryEntry,
 	operation: OperationInfo,
-	input: Record<string, unknown>,
+	input: InvokeOperationInput,
 	context: ToolContext
 ): Promise<vscode.PreparedToolInvocation> {
 	let url: string;
 	try {
-		url = buildRequest(entry.registration, operation, toInvokeInput(input)).url;
+		url = buildRequest(entry.registration, operation, input).url;
 	} catch (error) {
 		return {
 			invocationMessage: new vscode.MarkdownString(
@@ -113,7 +128,7 @@ async function buildConfirmation(
 	return {
 		confirmationMessages: {
 			title: `Invoke ${entry.registration.title} — ${operation.operationId}`,
-			message: renderConfirmationMarkdown(operation.method.toUpperCase(), url, hasToken, previewBody(input['body'])),
+			message: renderConfirmationMarkdown(operation.method.toUpperCase(), url, hasToken, previewBody(input.body)),
 		},
 	};
 }
@@ -139,35 +154,20 @@ function renderConfirmationMarkdown(
 	return message;
 }
 
-async function invokeOperation(context: ToolContext, input: Record<string, unknown>): Promise<vscode.LanguageModelToolResult> {
-	const args = parseInvokeArgs(input);
-	if (args instanceof vscode.LanguageModelToolResult) {
-		return args;
-	}
-	const found = resolveEntry(context.registry, args.apiId);
+async function invokeOperation(
+	context: ToolContext,
+	input: InvokeOperationInput
+): Promise<vscode.LanguageModelToolResult> {
+	const found = resolveEntry(context.registry, input.apiId);
 	if (isFailure(found)) {
 		return found;
 	}
-	const operation = found.index.get(args.operationId);
+	const operation = found.index.get(input.operationId);
 	if (!operation) {
 		const available = [...found.index.keys()].join(', ');
-		return errorResult(`Unknown operationId "${args.operationId}". Available operations: ${available}.`);
+		return errorResult(`Unknown operationId "${input.operationId}". Available operations: ${available}.`);
 	}
 	return executeOperation(found, operation, input, context);
-}
-
-type ParsedArgs = { apiId: string; operationId: string } | vscode.LanguageModelToolResult;
-
-function parseInvokeArgs(input: Record<string, unknown>): ParsedArgs {
-	const apiId = readString(input, 'apiId');
-	if (!apiId) {
-		return errorResult('Missing required string parameter "apiId".');
-	}
-	const operationId = readString(input, 'operationId');
-	if (!operationId) {
-		return errorResult('Missing required string parameter "operationId".');
-	}
-	return { apiId, operationId };
 }
 
 /**
@@ -177,12 +177,12 @@ function parseInvokeArgs(input: Record<string, unknown>): ParsedArgs {
 async function executeOperation(
 	entry: RegistryEntry,
 	operation: OperationInfo,
-	input: Record<string, unknown>,
+	input: InvokeOperationInput,
 	context: ToolContext
 ): Promise<vscode.LanguageModelToolResult> {
 	let request;
 	try {
-		request = buildRequest(entry.registration, operation, toInvokeInput(input));
+		request = buildRequest(entry.registration, operation, input);
 	} catch (error) {
 		if (error instanceof RequestBuildError) {
 			return textResult({ error: error.message, method: operation.method.toUpperCase(), operationId: operation.operationId });
@@ -296,15 +296,6 @@ function structuredError(error: string, url: string): Record<string, unknown> {
 		error,
 		url,
 		hint: 'Correct the arguments and retry, or pick a different operation.',
-	};
-}
-
-function toInvokeInput(input: Record<string, unknown>): InvokeInput {
-	return {
-		pathParams: asRecord(input['pathParams']),
-		queryParams: asRecord(input['queryParams']),
-		headers: asRecord(input['headers']),
-		body: input['body'],
 	};
 }
 

@@ -5,6 +5,10 @@
  * in-memory views (NFR-4 — no network I/O during discovery) and wraps the
  * core builders' plain-JSON output into a single-text-part tool result.
  * None of these tools declares confirmation.
+ *
+ * The host validates `options.input` against the `inputSchema` declared in
+ * package.json before dispatching (`vscode.d.ts:21166`), so inputs are
+ * consumed directly without runtime coercion.
  */
 import * as vscode from 'vscode';
 import {
@@ -13,10 +17,43 @@ import {
 	buildListApis,
 	buildListOperations,
 } from '../../core/describe';
-import { asRecord, errorResult, isFailure, noApisRegistered, readString, resolveEntry, textResult } from './common';
+import { isFailure, noApisRegistered, resolveEntry, textResult } from './common';
 import { ToolContext } from './context';
 
-export function createListApisTool(context: ToolContext): vscode.LanguageModelTool<unknown> {
+/**
+ * Typed input shape for the `gateway_list_apis` tool.
+ */
+export type ListApisInput = Record<string, never>;
+
+/**
+ * Typed input shape for the `gateway_describe_api` tool.
+ */
+export interface DescribeApiInput {
+	apiId: string;
+}
+
+/**
+ * Typed input shape for the `gateway_list_api_operations` tool.
+ */
+export interface ListOperationsInput {
+	apiId: string;
+	groups: string[];
+}
+/**
+ * Typed input shape for the `gateway_describe_api_operation` tool.
+ */
+export interface DescribeOperationInput {
+	apiId: string;
+	operationId: string;
+}
+
+/**
+ * Creates the `gateway_list_apis` tool, which lists all registered APIs.
+ *
+ * @param context - Shared tool dependencies.
+ * @returns A `LanguageModelTool` that lists all registered APIs.
+ */
+export function createListApisTool(context: ToolContext): vscode.LanguageModelTool<ListApisInput> {
 	return {
 		invoke: () => {
 			const registrations = context.registry.list();
@@ -28,13 +65,16 @@ export function createListApisTool(context: ToolContext): vscode.LanguageModelTo
 	};
 }
 
-export function createDescribeApiTool(context: ToolContext): vscode.LanguageModelTool<unknown> {
+/**
+ * Creates the `gateway_describe_api` tool, which describes a registered API.
+ *
+ * @param context - Shared tool dependencies.
+ * @returns A `LanguageModelTool` that describes a registered API.
+ */
+export function createDescribeApiTool(context: ToolContext): vscode.LanguageModelTool<DescribeApiInput> {
 	return {
 		invoke: (options) => {
-			const apiId = readString(asRecord(options.input), 'apiId');
-			if (!apiId) {
-				return errorResult('Missing required string parameter "apiId".');
-			}
+			const { apiId } = options.input;
 			const found = resolveEntry(context.registry, apiId);
 			if (isFailure(found)) {
 				return found;
@@ -44,37 +84,40 @@ export function createDescribeApiTool(context: ToolContext): vscode.LanguageMode
 	};
 }
 
-export function createListOperationsTool(context: ToolContext): vscode.LanguageModelTool<unknown> {
+/**
+ * Creates the `gateway_list_api_operations` tool, which lists operations of a
+ * registered API.
+ *
+ * @param context - Shared tool dependencies.
+ * @returns A `LanguageModelTool` that lists operations of a registered API.
+ */
+export function createListOperationsTool(context: ToolContext): vscode.LanguageModelTool<ListOperationsInput> {
 	return {
 		invoke: (options) => {
-			const input = asRecord(options.input);
-			const apiId = readString(input, 'apiId');
-			if (!apiId) {
-				return errorResult('Missing required string parameter "apiId".');
-			}
+			const { apiId, groups } = options.input;
 			const found = resolveEntry(context.registry, apiId);
 			if (isFailure(found)) {
 				return found;
 			}
-			const rawGroups = Array.isArray(input['groups']) ? input['groups'] : [];
-			const groups = rawGroups.filter((name): name is string => typeof name === 'string');
 			return textResult(buildListOperations(found.registration, groups));
 		},
 	};
 }
 
-export function createDescribeOperationTool(context: ToolContext): vscode.LanguageModelTool<unknown> {
+/**
+ * Creates the `gateway_describe_api_operation` tool, which describes a specific
+ * operation of a registered API.
+ *
+ * @param context - Shared tool dependencies.
+ * @returns A `LanguageModelTool` that describes a specific operation of a
+ * registered API.
+ */
+export function createDescribeOperationTool(
+	context: ToolContext
+): vscode.LanguageModelTool<DescribeOperationInput> {
 	return {
 		invoke: (options) => {
-			const input = asRecord(options.input);
-			const apiId = readString(input, 'apiId');
-			if (!apiId) {
-				return errorResult('Missing required string parameter "apiId".');
-			}
-			const operationId = readString(input, 'operationId');
-			if (!operationId) {
-				return errorResult('Missing required string parameter "operationId".');
-			}
+			const { apiId, operationId } = options.input;
 			const found = resolveEntry(context.registry, apiId);
 			if (isFailure(found)) {
 				return found;

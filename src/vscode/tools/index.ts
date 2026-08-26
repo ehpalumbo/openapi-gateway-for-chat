@@ -8,23 +8,15 @@
  * input schema are declared in package.json under
  * `contributes.languageModelTools`; this module registers only the
  * implementations. Tests import the factories from `./discovery` /
- * `./invocation` directly.
+ * `./invocation` directly. `vscode.lm.registerTool` is generic over the
+ * input type, so each binding preserves its concrete input shape.
  */
 import * as vscode from 'vscode';
-import { ToolContext, ToolFactory } from './context';
+import { ToolContext } from './context';
 import { createDescribeApiTool, createDescribeOperationTool, createListApisTool, createListOperationsTool } from './discovery';
 import { createInvokeOperationTool } from './invocation';
 
 export type { ToolContext } from './context';
-
-/** The agent-facing gateway tools and how their implementations are built. */
-const TOOL_FACTORIES: readonly (readonly [name: string, factory: ToolFactory])[] = [
-	['gateway_list_apis', createListApisTool],
-	['gateway_describe_api', createDescribeApiTool],
-	['gateway_list_api_operations', createListOperationsTool],
-	['gateway_describe_api_operation', createDescribeOperationTool],
-	['gateway_invoke_operation', createInvokeOperationTool],
-];
 
 /**
  * Registers all gateway tools into VS Code.
@@ -33,5 +25,11 @@ const TOOL_FACTORIES: readonly (readonly [name: string, factory: ToolFactory])[]
  * @returns Disposables to push onto the extension context.
  */
 export function registerGatewayTools(ctx: ToolContext): vscode.Disposable[] {
-	return TOOL_FACTORIES.map(([name, factory]) => vscode.lm.registerTool(name, factory(ctx)));
+	return [
+		vscode.lm.registerTool('gateway_list_apis', createListApisTool(ctx)),
+		vscode.lm.registerTool('gateway_describe_api', createDescribeApiTool(ctx)),
+		vscode.lm.registerTool('gateway_list_api_operations', createListOperationsTool(ctx)),
+		vscode.lm.registerTool('gateway_describe_api_operation', createDescribeOperationTool(ctx)),
+		vscode.lm.registerTool('gateway_invoke_operation', createInvokeOperationTool(ctx)),
+	];
 }

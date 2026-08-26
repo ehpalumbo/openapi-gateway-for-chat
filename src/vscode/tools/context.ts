@@ -5,7 +5,6 @@
  * Kept structural (no class) so tests can supply fakes without constructing
  * real VS Code stores.
  */
-import type * as vscode from 'vscode';
 import type { ApiRegistry } from '../../store/registry';
 import type { TokenStore } from '../../store/secrets';
 import type { SpillStore } from '../spills';
@@ -26,8 +25,3 @@ export interface ToolContext {
 	/** Spill-file store for non-image binary response bodies (R-RESP-3). */
 	spills: SpillStore;
 }
-
-/**
- * Builds one `LanguageModelTool` implementation for a contributed tool name.
- */
-export type ToolFactory = (context: ToolContext) => vscode.LanguageModelTool<unknown>;
