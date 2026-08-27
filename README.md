@@ -86,6 +86,17 @@ npm test           # unit suites (pure Node/mocha) + integration suites (vscode-
 
 Integration tests start an ephemeral local HTTP server inside VS Code's extension host; no network access beyond `127.0.0.1` is required.
 
+## Release
+
+Releases are tag-driven and never publish to the Visual Studio Marketplace — they only produce a VSIX attached to a GitHub release (`.github/workflows/release.yml`).
+
+1. Set the version in `package.json` and `package-lock.json` (e.g. `0.1.0`), following [semver](https://semver.org/).
+2. Commit and push.
+3. Tag and push: `git tag v0.1.0 && git push upstream v0.1.0`.
+4. The workflow runs the test suite, builds `openapi-gateway-for-chat-<version>.vsix` with `@vscode/vsce`, and creates a GitHub release with the artifact and auto-generated notes.
+
+Install the VSIX from the release with **Extensions: Install from VSIX...** or the [VS Code CLI](https://code.visualstudio.com/docs/editor/command-line#_working-with-extensions): `code --install-extension openapi-gateway-for-chat-<version>.vsix`.
+
 ## Security notes
 
 - Bearer tokens are kept exclusively in VS Code **SecretStorage**; they never appear in logs, confirmations, or tool results.
