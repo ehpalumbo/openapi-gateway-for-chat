@@ -259,19 +259,19 @@ async function spillBody(
 ): Promise<vscode.LanguageModelTextPart> {
 	const fileName = buildSpillFileName(`${entry.registration.apiId}-${operation.operationId}`, mimeType, randomToken);
 	const filePath = await context.spills.write(fileName, bytes);
-	return new vscode.LanguageModelTextPart(
-		JSON.stringify(
-			{
-				contentType: mimeType,
-				byteSize: bytes.byteLength,
-				filePath,
-				hint:
-					'The binary body was saved to this file because it cannot be delivered as model-readable text. ' +
-					'Inspect it with shell tools, or open the file directly.',
-			},
-			null,
-			2
-		)
+	return new vscode.LanguageModelTextPart(renderSpillNotice(mimeType, bytes.byteLength, filePath));
+}
+
+/**
+ * Renders the spill reference as plain text framed as a gateway notice so a
+ * model cannot mistake it for actual API response content (R-RESP-3).
+ */
+function renderSpillNotice(mimeType: string, byteSize: number, filePath: string): string {
+	return (
+		'[gateway notice, not API response content]\n' +
+		`The response body was a non-image binary (${mimeType}; ${byteSize} bytes) that could not be rendered as text. It was saved to:\n` +
+		`${filePath}\n` +
+		'Use shell tools or open the file directly.'
 	);
 }
 
