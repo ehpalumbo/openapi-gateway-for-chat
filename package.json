@@ -2,7 +2,7 @@
   "name": "openapi-gateway-for-chat",
   "displayName": "OpenAPI Gateway for Chat",
   "description": "Expose remote REST APIs to AI agents in VS Code as native language model tools. Register APIs with OpenAPI 3.0/3.1 specifications via extension commands; the extension registers language model tools (`vscode.lm`) that let Copilot Chat agents and other language model consumers progressively discover and invoke those APIs.",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": {
     "name": "EH Palumbo",
     "url": "https://github.com/ehpalumbo"
@@ -209,6 +209,7 @@
     "@types/vscode": "^1.134.0",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1",
     "eslint": "^10.5.0",
     "mocha": "^11.8.0",

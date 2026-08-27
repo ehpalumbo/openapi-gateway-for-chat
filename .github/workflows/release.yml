@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - name: Resolve version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Sync manifest version
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+      - name: Test
+        run: xvfb-run -a npm test
+      - name: Package VSIX
+        run: npm exec -- @vscode/vsce package -o "openapi-gateway-for-chat-${{ steps.version.outputs.version }}.vsix"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" *.vsix --generate-notes
