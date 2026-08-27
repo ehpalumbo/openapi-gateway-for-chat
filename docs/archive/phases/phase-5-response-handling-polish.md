@@ -1,3 +1,17 @@
+---
+type: guide
+title: "Phase 5 — Response Handling & Polish"
+description: "Archived v0 phase finishing R-RESP-1..3 response routing, the inline/spill mechanics with deactivation cleanup, and the final error-message, README, and end-to-end release polish pass."
+tags:
+  - "implementation-plan"
+  - "phase"
+  - "response-handling"
+  - "release"
+timestamp: "2026-08-27T00:00:00Z"
+related:
+  - "[Implementation Plan](../implementation-plan.md)"
+---
+
 # Phase 5 — Response Handling & Polish
 
 > **Revision (2026-08-26, code review):** the spill design below was removed
@@ -31,7 +45,7 @@ This phase finishes R-RESP-1..3 by replacing the Phase 4 pass-through response p
 
 - **Prerequisites / Dependencies:** Phase 1 types.
 - **Affected Files:**
-  - [response-handler.ts](../../src/core/response-handler.ts) (new)
+  - [response-handler.ts](../../../src/core/response-handler.ts) (new)
 - **Affected Symbols:** `processResponse(raw: RawResponse, opts: { thresholdBytes: number; writer: SpillWriter }): ProcessedResponse`, `RawResponse`, `ProcessedResponse`
 - **Description:** Pure-ish function taking buffered body bytes + content type. Binary detection via non-text content types (`application/json` and `text/*` are text; everything else — images, octet-stream, pdf… — is binary) (R-RESP-3). If byte length ≤ threshold → `{ kind: 'inline', mimeType, bytes }`; the tools layer serves this as a `vscode.LanguageModelDataPart` carrying the raw response bytes with their MIME type (R-RESP-1). Otherwise → write bytes via the injected `SpillWriter` seam — whose production implementation uses **`vscode.workspace.fs.writeFile`** — to a **uniquely named** file (UUID-suffixed, e.g. `<apiId>-<operationId>-<uuid>.json`) so concurrent/repeated calls never override each other; extension is derived from the MIME type (`.json` for JSON so tools like `jq` work) and return `{ kind: 'file', filePath, statusLine, headers, byteSize }` (R-RESP-2). Every spilled path is recorded so deactivation cleanup can remove it.
 - **Acceptance Criteria:**
@@ -45,7 +59,7 @@ This phase finishes R-RESP-1..3 by replacing the Phase 4 pass-through response p
 
 - **Prerequisites / Dependencies:** Task 1.
 - **Affected Files:**
-  - [response-handler.test.ts](../../src/test/core/response-handler.test.ts) (new)
+  - [response-handler.test.ts](../../../src/test/core/response-handler.test.ts) (new)
 - **Description:** Boundary tests (threshold ±1), binary detection table (`image/png`, `application/octet-stream`, `text/plain`, `application/json`), writer-callback assertions capturing unique paths/mode/bytes without touching the filesystem; inline assertions check exact bytes and MIME type exposure.
 - **Acceptance Criteria:**
   - [ ] All Task 1 criteria asserted; no real temp files created during tests.
@@ -54,7 +68,7 @@ This phase finishes R-RESP-1..3 by replacing the Phase 4 pass-through response p
 
 - **Prerequisites / Dependencies:** Tasks 1, Phase 4 Task 3, Phase 2 Task 6 setting.
 - **Affected Files:**
-  - [tools.ts](../../src/vscode/tools.ts) (modify), [extension.ts](../../src/extension.ts) (modify)
+  - [tools.ts](../../../src/vscode/tools/index.ts) (modify), [extension.ts](../../../src/extension.ts) (modify)
 - **Description:** Replace inline-only processing with `processResponse`, reading `thresholdBytes` from `workspace.getConfiguration('openapiGateway')` per call. Inline results are served as `new vscode.LanguageModelDataPart(bytes, mimeType)` plus a text part with the status line and headers. For spilled results, render a **text-part** tool output with the absolute file path plus metadata (status line, headers, byteSize) and a hint suggesting shell tools (`jq`, `grep`) or opening the file — model-actionable wording (NFR-3). The production spill writer uses `vscode.workspace.fs`: ensure `<globalStorage>/response-spills/` via `workspace.fs.createDirectory`, write with `workspace.fs.writeFile` under UUID-suffixed names, and track created paths. On `deactivate`, best-effort delete all recorded spill files via `workspace.fs.delete`.
 - **Acceptance Criteria:**
   - [ ] Invoking an endpoint returning > 8 KB yields a text result containing a file path, not the body.
@@ -66,7 +80,7 @@ This phase finishes R-RESP-1..3 by replacing the Phase 4 pass-through response p
 
 - **Prerequisites / Dependencies:** Task 3.
 - **Affected Files:**
-  - [invocation.test.ts](../../src/test/invocation.test.ts) (modify)
+  - [invocation.test.ts](../../../src/test/invocation.test.ts) (modify)
 - **Description:** Extend the local server fixtures with routes returning ~20 KB JSON, a small PNG, and a small JSON payload. Assert file-mode result shape for both spill cases (oversize JSON and the PNG — binaries always spill regardless of size), with the spilled file existing on disk at a unique path (real globalStorage tmpdir acceptable here). Assert the small-JSON case yields a `LanguageModelDataPart` carrying the exact bytes and `application/json` MIME type.
 - **Acceptance Criteria:**
   - [ ] Both spill cases produce `kind: 'file'` results whose paths exist, are unique across repeated calls, and match expected byte sizes.
@@ -76,7 +90,7 @@ This phase finishes R-RESP-1..3 by replacing the Phase 4 pass-through response p
 
 - **Prerequisites / Dependencies:** All prior tasks/phases.
 - **Affected Files:**
-  - [README.md](../../README.md) (modify), all `src/**` files as needed
+  - [README.md](../../../README.md) (modify), all `src/**` files as needed
 - **Description:** Sweep all user/model-facing strings against NFR-3 (specific, actionable, secret-free); verify every command has a sensible title/category ("OpenAPI Gateway"); update README with install/dev/test instructions, registration walkthrough, response-serving behavior (inline `LanguageModelDataPart` payloads vs. spill-file text results), spill-file storage/cleanup on deactivation, security notes (SecretStorage, redaction), and limitations (JSON-only specs, Bearer-only auth). Run full DoD checklist from the index plan.
 - **Acceptance Criteria:**
   - [ ] No error message leaks token values or full spec URLs containing credentials.

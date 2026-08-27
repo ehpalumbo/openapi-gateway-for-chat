@@ -1,3 +1,17 @@
+---
+type: guide
+title: "Phase 2 — Registration & Persistence"
+description: "Archived v0 phase making APIs registrable and durable: size-limited fetching, the globalState-backed registry with last-good snapshots, SecretStorage token store, the four commands, activation refresh, and package.json contributions."
+tags:
+  - "implementation-plan"
+  - "phase"
+  - "registration"
+  - "persistence"
+timestamp: "2026-08-27T00:00:00Z"
+related:
+  - "[Implementation Plan](../implementation-plan.md)"
+---
+
 # Phase 2 — Registration & Persistence
 
 ## Overview
@@ -10,7 +24,7 @@ This phase makes APIs registrable and durable: a size-limited HTTP fetcher, the 
 
 - **Prerequisites / Dependencies:** None.
 - **Affected Files:**
-  - [http.ts](../../src/vscode/http.ts) (new)
+  - [http.ts](../../../src/vscode/http.ts) (new)
 - **Affected Symbols:** `fetchWithLimit(url: string, maxBytes: number): Promise<{ text: string; finalUrl: string }>`
 - **Description:** Use global `fetch`. Validate protocol is `http`/`https` before requesting (NFR-2). Enforce the byte cap on both `Content-Length` and accumulated chunk reads while streaming the body; abort with an actionable error past the cap. Follow redirects but return the final URL.
 - **Acceptance Criteria:**
@@ -22,7 +36,7 @@ This phase makes APIs registrable and durable: a size-limited HTTP fetcher, the 
 
 - **Prerequisites / Dependencies:** Task 1 of Phase 1 (types).
 - **Affected Files:**
-  - [registry.ts](../../src/store/registry.ts) (new)
+  - [registry.ts](../../../src/store/registry.ts) (new)
 - **Affected Symbols:** `ApiRegistry` (`load`, `save`, `upsert`, `remove`, `list`, `get`, `has`), runtime view `{ registration, model, index }`
 - **Description:** Wrap a `vscode.Memento` (passed in as `vscode.Memento`, stored under key `registeredApis`). Keep registrations as `ApiRegistration[]`; `snapshot.model` holds the last successfully parsed, grouped API model so failures at refresh time never destroy usability (R-REG-7). Maintain an in-memory per-API runtime view — `Map<apiId, { registration, model, index }>` where `index = buildOperationIndex(model)` (see phase 1 refinement) — rebuilt on every mutation (`upsert`, `remove`, refresh) so the derived index can never drift from the persisted model. Operation IDs are unique within an API only; never flatten indices across APIs. `upsert` rejects duplicate `apiId` by returning a typed conflict result the caller resolves by prompting (R-REG-8).
 - **Acceptance Criteria:**
@@ -34,7 +48,7 @@ This phase makes APIs registrable and durable: a size-limited HTTP fetcher, the 
 
 - **Prerequisites / Dependencies:** None.
 - **Affected Files:**
-  - [secrets.ts](../../src/store/secrets.ts) (new)
+  - [secrets.ts](../../../src/store/secrets.ts) (new)
 - **Affected Symbols:** `TokenStore` (`setToken`, `deleteToken`, `getToken`)
 - **Description:** Thin wrapper over `vscode.SecretStorage` keyed by `apiId:<apiId>`. Tokens are written nowhere else — no logging, no results, no settings (R-AUTH-2, NFR-1).
 - **Acceptance Criteria:**
@@ -45,9 +59,9 @@ This phase makes APIs registrable and durable: a size-limited HTTP fetcher, the 
 
 - **Prerequisites / Dependencies:** Tasks 1–3.
 - **Affected Files:**
-  - [commands/common.ts](../../src/vscode/commands/common.ts) (new) — shared `CommandContext`, spec loading/parsing helpers, pure suggestion helpers
-  - [commands/register.ts](../../src/vscode/commands/register.ts), [commands/unregister.ts](../../src/vscode/commands/unregister.ts), [commands/refresh.ts](../../src/vscode/commands/refresh.ts) (new) — one module per command exporting a plain handler `(ctx: CommandContext) => …`
-  - [commands/index.ts](../../src/vscode/commands/index.ts) (new) — the only place binding handlers to VS Code command IDs via `vscode.commands.registerCommand`
+  - [commands/common.ts](../../../src/vscode/commands/common.ts) (new) — shared `CommandContext`, spec loading/parsing helpers, pure suggestion helpers
+  - [commands/register.ts](../../../src/vscode/commands/register.ts), [commands/unregister.ts](../../../src/vscode/commands/unregister.ts), [commands/refresh.ts](../../../src/vscode/commands/refresh.ts) (new) — one module per command exporting a plain handler `(ctx: CommandContext) => …`
+  - [commands/index.ts](../../../src/vscode/commands/index.ts) (new) — the only place binding handlers to VS Code command IDs via `vscode.commands.registerCommand`
 - **Affected Symbols:** `registerApiCommands(ctx: { registry: ApiRegistry; tokens: TokenStore; onChange: () => void })` in `index.ts`; per-module handlers `registerFromUrlHandler`, `registerFromFileHandler`, `unregisterApiHandler`, `refreshApisHandler`; test-facing helpers in `common.ts` (`buildSnapshot`, `createRegistration`, `loadSpecFromSource`, `resolveBaseUrlSuggestion`) and `refreshAll` in `refresh.ts`
 - **Description:** Four commands:
   - `openapi-gateway-for-chat.registerApiFromUrl` (R-REG-1): URL input box → `fetchWithLimit` → `parseSpec` → prompt unique `apiId` (prefill from title slug; re-prompt on conflict) → confirm base URL: QuickPick when multiple `servers`, then an always-shown editable InputBox pre-filled with the suggestion so placeholder URIs can be overridden (R-REG-9) → optional password InputBox for Bearer token → `tokens.setToken` if provided → `upsert`.
@@ -66,7 +80,7 @@ This phase makes APIs registrable and durable: a size-limited HTTP fetcher, the 
 
 - **Prerequisites / Dependencies:** Task 4.
 - **Affected Files:**
-  - [extension.ts](../../src/extension.ts) (modify), [package.json](../../package.json) (modify)
+  - [extension.ts](../../../src/extension.ts) (modify), [package.json](../../../package.json) (modify)
 - **Affected Symbols:** `activate`
 - **Description:** Replace hello-world scaffold. On activate: create `ApiRegistry(context.globalState)` + `TokenStore(context.secrets)`; run refresh logic once (same code path as the refresh command); register commands into `context.subscriptions`; call a stubbed `registerGatewayTools(...)` (Phase 3) guarded so this phase compiles standalone — e.g., accept an optional callback that is a no-op until Phase 3 lands. Contribute all four commands plus titles in `contributes.commands`.
 - **Acceptance Criteria:**
@@ -78,7 +92,7 @@ This phase makes APIs registrable and durable: a size-limited HTTP fetcher, the 
 
 - **Prerequisites / Dependencies:** None (needed by Phase 5 but trivially additive here).
 - **Affected Files:**
-  - [package.json](../../package.json) (modify)
+  - [package.json](../../../package.json) (modify)
 - **Description:** `contributes.configuration` with `openapiGateway.inlineResponseThreshold`: type number, default `8192`, scope `application`, description stating bytes.
 - **Acceptance Criteria:**
   - [ ] Setting appears under the extension's settings section with default 8192.
@@ -87,7 +101,7 @@ This phase makes APIs registrable and durable: a size-limited HTTP fetcher, the 
 
 - **Prerequisites / Dependencies:** Tasks 1–5.
 - **Affected Files:**
-  - [registration.test.ts](../../src/test/registration.test.ts) (new), [fixtures/petstore30.json](../../src/test/fixtures/petstore30.json) (new), [fixtures/multiserver31.json](../../src/test/fixtures/multiserver31.json) (new), [fixtures/swagger20.json](../../src/test/fixtures/swagger20.json) (new)
+  - [registration.test.ts](../../../src/test/registration.test.ts) (new), [fixtures/petstore30.json](../../../src/test/fixtures/petstore30.json) (new), [fixtures/multiserver31.json](../../../src/test/fixtures/multiserver31.json) (new), [fixtures/swagger20.json](../../../src/test/fixtures/swagger20.json) (new)
 - **Description:** Start an ephemeral `node:http` server inside the suite to serve fixture specs and simulate oversize responses (verifies Task 1). Exercise: successful URL registration end-to-end through the command handler function (invoked directly, not via UI); version/YAML rejection messages; persistence across a fresh `ApiRegistry` bound to the shared globalState; conflict detection; refresh-failure snapshot retention.
 - **Acceptance Criteria:**
   - [ ] Registration via served URL yields a persisted `ApiRegistration` with parsed operations count > 0.
