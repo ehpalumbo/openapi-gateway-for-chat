@@ -1,4 +1,25 @@
+---
+type: specification
+title: "Implementation Plan: OpenAPI Gateway for Chat — MVP"
+description: "Phased MVP implementation plan for the extension: two-layer core/store/vscode architecture, five language-model tools, test strategy, and whole-feature definition of done — archived after the first shippable release landed."
+tags:
+  - "implementation-plan"
+  - "vscode-extension"
+  - "language-model-tools"
+  - "openapi"
+timestamp: "2026-08-27T00:00:00Z"
+related:
+  - "[Software Specification](../specs/software-specification.md)"
+  - "[Phase 1 — Core Model](phases/phase-1-core-model.md)"
+  - "[Phase 2 — Registration & Persistence](phases/phase-2-registration.md)"
+  - "[Phase 3 — Discovery Tools](phases/phase-3-discovery-tools.md)"
+  - "[Phase 4 — Invocation Tool & Safety](phases/phase-4-invocation-safety.md)"
+  - "[Phase 5 — Response Handling & Polish](phases/phase-5-response-handling-polish.md)"
+---
+
 # Implementation Plan: OpenAPI Gateway for Chat — MVP
+
+> **ARCHIVED (2026-08-27):** v0 implementation plan for the first shippable release, which has landed. Superseded by the shipped implementation and the [Software Specification](../specs/software-specification.md); retained as historical context for the build-out decisions and phase structure.
 
 ## Metadata
 

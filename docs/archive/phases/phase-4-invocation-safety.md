@@ -1,3 +1,17 @@
+---
+type: guide
+title: "Phase 4 — Invocation Tool & Safety Confirmation"
+description: "Archived v0 phase completing the agent-facing surface: request builder, gateway_invoke_operation against the registered base URL, native prepareInvocation confirmation for non-safe methods, and structured model-readable error results."
+tags:
+  - "implementation-plan"
+  - "phase"
+  - "invocation"
+  - "safety"
+timestamp: "2026-08-27T00:00:00Z"
+related:
+  - "[Implementation Plan](../implementation-plan.md)"
+---
+
 # Phase 4 — Invocation Tool & Safety Confirmation
 
 ## Overview
@@ -10,7 +24,7 @@ This phase completes the agent-facing surface: `gateway_invoke_operation` execut
 
 - **Prerequisites / Dependencies:** Phase 1 types.
 - **Affected Files:**
-  - [request-builder.ts](../../src/core/request-builder.ts) (new)
+  - [request-builder.ts](../../../src/core/request-builder.ts) (new)
 - **Affected Symbols:** `buildRequest(reg: ApiRegistration, op: OperationInfo, input: InvokeInput): { method, url, headers, body? }`, `InvokeInput`
 - **Description:** Substitute path params into the path template; fail fast listing missing required path params with actionable message (R-INV-3). Serialize query params supporting string/number/boolean/array values (arrays → repeated keys). Merge user headers under spec-declared header params. Base URL is strictly `reg.baseUrl`; reject any URL-ish input fields (R-INV-4). Body passes through as JSON when the operation declares a request body.
 - **Acceptance Criteria:**
@@ -22,7 +36,7 @@ This phase completes the agent-facing surface: `gateway_invoke_operation` execut
 
 - **Prerequisites / Dependencies:** Task 1.
 - **Affected Files:**
-  - [request-builder.test.ts](../../src/test/core/request-builder.test.ts) (new)
+  - [request-builder.test.ts](../../../src/test/core/request-builder.test.ts) (new)
 - **Description:** Cover all acceptance rules plus trailing-slash normalization between base URL and path template, and rejection when input attempts to override the host via header injection of `Host`.
 - **Acceptance Criteria:**
   - [ ] All criteria from Task 1 have corresponding assertions; suite green in same phase.
@@ -31,7 +45,7 @@ This phase completes the agent-facing surface: `gateway_invoke_operation` execut
 
 - **Prerequisites / Dependencies:** Tasks 1, Phase 3 tools infrastructure, Phase 2 stores.
 - **Affected Files:**
-  - [tools.ts](../../src/vscode/tools.ts) (modify)
+  - [tools.ts](../../../src/vscode/tools/index.ts) (modify)
 - **Affected Symbols:** new `TOOL_FACTORIES` entry `['gateway_invoke_operation', createInvokeOperationTool]`; helpers `isSafeMethod(method)`, `buildConfirmationMessage(request)`
 - **Description:** Add a fifth factory to the table in `src/vscode/tools.ts` (the single `vscode.lm.registerTool` call site stays unchanged; see the Phase 3 as-built refinements). The factory needs the `TokenStore`, so thread it through `registerGatewayTools(context, registry, tokens)`:
   - `prepareInvocation`: resolve operation via `registry.getEntry(apiId)` — reusing its prebuilt index, never rebuilding; if method is not `GET`/`HEAD`, return `confirmationMessages` whose MarkdownString shows HTTP method, resolved URL, headers with `Authorization` redacted to `Bearer ***`, and a truncated body preview (R-SAFE-3); otherwise omit confirmation entirely (R-SAFE-1).
@@ -46,7 +60,7 @@ This phase completes the agent-facing surface: `gateway_invoke_operation` execut
 
 - **Prerequisites / Dependencies:** Task 3.
 - **Affected Files:**
-  - [invocation.test.ts](../../src/test/invocation.test.ts) (new), [fixtures/echo30.json](../../src/test/fixtures/echo30.json) (new)
+  - [invocation.test.ts](../../../src/test/invocation.test.ts) (new), [fixtures/echo30.json](../../../src/test/fixtures/echo30.json) (new)
 - **Description:** Ephemeral local HTTP server asserting received method/path/headers/body; fixture spec points its server at it. Cases: successful GET round-trip; required-path-param fast-fail message; POST flow asserting `prepareInvocation` output shape (called directly on the registered tool object obtained via `vscode.lm.tools`); auth header present when token set via `TokenStore`; structured error on server 500.
 - **Acceptance Criteria:**
   - [ ] Local server receives exactly the request the builder specified (method, encoded path, query, body).

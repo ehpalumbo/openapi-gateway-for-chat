@@ -1,3 +1,17 @@
+---
+type: guide
+title: "Phase 3 — Discovery Tools (Progressive Disclosure)"
+description: "Archived v0 phase exposing registered APIs to language models: the $ref schema-closure resolver, description builders, and the four gateway_* discovery tools registered through vscode.lm with zero network calls during discovery."
+tags:
+  - "implementation-plan"
+  - "phase"
+  - "discovery-tools"
+  - "language-model-tools"
+timestamp: "2026-08-27T00:00:00Z"
+related:
+  - "[Implementation Plan](../implementation-plan.md)"
+---
+
 # Phase 3 — Discovery Tools (Progressive Disclosure)
 
 ## Overview
@@ -16,7 +30,7 @@ This phase exposes registered APIs to language models: the `$ref` schema resolve
 
 - **Prerequisites / Dependencies:** Phase 1 types.
 - **Affected Files:**
-  - [schema-resolver.ts](../../src/core/schema-resolver.ts) (new)
+  - [schema-resolver.ts](../../../src/core/schema-resolver.ts) (new)
 - **Affected Symbols:** `resolveSchemaClosure(doc: OpenApiDocument, rootRef: string): ResolvedSchema[]`
 - **Description:** Given a starting `$ref`, collect the transitive closure of `components.schemas` references (local refs only: `#/components/schemas/...`). Return each referenced schema flattened in encounter order so tool output can list them "after each other" per R-SCH-1. Cycle-safe via visited set. Unrelated components are never included.
 - **Acceptance Criteria:**
@@ -28,7 +42,7 @@ This phase exposes registered APIs to language models: the `$ref` schema resolve
 
 - **Prerequisites / Dependencies:** Tasks 1, Phase 1 Task 4.
 - **Affected Files:**
-  - [describe.ts](../../src/core/describe.ts) (new)
+  - [describe.ts](../../../src/core/describe.ts) (new)
 - **Affected Symbols:** `buildListApis(registrations)`, `buildDescribeApi(api)`, `buildListOperations(api, groups: string[])`, `buildDescribeOperation(api, operationId)`
 - **Description:** Pure functions returning JSON-serializable objects for LLM consumption, reading from the nested `ApiModel` (see phase 1 refinement):
   - `list_apis`: `{ apiId, title, version, description? }[]`.
@@ -44,7 +58,7 @@ This phase exposes registered APIs to language models: the `$ref` schema resolve
 
 - **Prerequisites / Dependencies:** Task 2, Phase 2 activation wiring.
 - **Affected Files:**
-  - [tools.ts](../../src/vscode/tools.ts) (new)
+  - [tools.ts](../../../src/vscode/tools/index.ts) (new)
 - **Affected Symbols:** `registerGatewayTools(context, registry): { refresh() }`
 - **Description:** Register the four tools via `vscode.lm.registerTool` with JSON-schema `inputSchema`s matching spec §4 (`apiId` required everywhere; `groups: string[]` minItems 1 for `list_operations`). Each `invoke` reads purely from registry snapshots, returns `LanguageModelToolResult` with a single text part containing formatted JSON. Tool descriptions written for model consumption (NFR-3), e.g. `gateway_list_apis`: "Lists REST APIs registered by the user… start here before calling any API." Keep a module-level disposal list so `refresh()` unregisters + re-registers after registry mutations (wired to `onChange()` from Phase 2 Task 4).
 - **Acceptance Criteria:**
@@ -56,7 +70,7 @@ This phase exposes registered APIs to language models: the `$ref` schema resolve
 
 - **Prerequisites / Dependencies:** Tasks 1–3.
 - **Affected Files:**
-  - [discovery.test.ts](../../src/test/discovery.test.ts) (new)
+  - [discovery.test.ts](../../../src/test/discovery.test.ts) (new)
 - **Description:** Activate extension in test host, register fixture API programmatically through `ApiRegistry` + `registerGatewayTools`, then drive the full chain using `vscode.lm.invokeTool(name, { input, toolInvocationToken: undefined }, token)` (no confirmation needed for read-only discovery tools since they declare none). Assert: chain order works; `describe_operation` closure correctness on a fixture with nested refs; unknown-group error lists available groups.
 - **Acceptance Criteria:**
   - [ ] End-to-end progressive disclosure chain succeeds against `petstore30.json` fixture.
