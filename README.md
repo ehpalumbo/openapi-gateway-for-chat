@@ -18,7 +18,7 @@ The extension is therefore a **convenience layer**: no external processes, no ex
 - **Invocation tool**: `gateway_invoke_operation` with structured tool input validation against the spec.
 - **Safe by default**: non-safe HTTP methods require explicit user confirmation before each call, with redacted headers and a body preview.
 - **Static Bearer-token auth**, stored securely in VS Code SecretStorage.
-- **Uniform response serving**: every HTTP response arrives as two parts — plain-text metadata (raw HTTP head: bare status line, headers, blank line) plus the body routed by content type.
+- **Uniform response serving**: every HTTP response arrives as a plain-text metadata part (raw HTTP head: bare status line, headers, blank line) that is always present, plus — only when there is a body — a body part routed by content type (skips the body part for empty `204`/`404` etc.).
 
 See [docs/index.md](docs/index.md) for the full software specification.
 
@@ -54,15 +54,15 @@ Agents see five tools (names as contributed):
 
 ## How responses are served
 
-Every response carrying an HTTP status is returned as exactly two tool-result parts:
+Every response carrying an HTTP status is returned as one or two tool-result parts:
 
-1. **Metadata** — a text part containing the raw HTTP head as plain text — bare status line (`200 OK`), headers in arrival order as `key: value` (lower-case as returned by `fetch()`), then a blank line (`statusLine\nheaders\n\n`) — so the model can read the status code and headers directly.
-2. **Body** — routed by content type:
+1. **Metadata** — a text part containing the raw HTTP head as plain text — bare status line (`200 OK`), headers in arrival order as `key: value` (lower-case as returned by `fetch()`), then a blank line (`statusLine\nheaders\n\n`) — so the model can read the status code and headers directly. **Always present.**
+2. **Body** — routed by content type — **present only when there is a body** (responses without a body, e.g. `204 No Content` or an empty `404`, return only the metadata part):
    - Textual types (`text/*`, `application/json`, `+json`): a text part with the UTF-8 body, served whole.
    - Vision-safe images (`image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/bmp`): an image `LanguageModelDataPart`.
    - Any other binary (PDFs, octet-stream, …): written via `vscode.workspace.fs` to `<storageUri>/response-spills/<apiId>-<operationId>-<uuid>.<ext>` — uniquely named so concurrent calls never override each other — and referenced from a text part with content type, byte size, and the absolute path. Spilled files are deleted on extension deactivation.
 
-Non-2xx statuses are not special-cased: the model detects failure from the metadata part and receives the full error body. Only failures without a status — network errors — fall back to a plain text result describing the connectivity problem.
+Non-2xx statuses are not special-cased: the model detects failure from the metadata part and receives the full error body when there is one (empty error bodies return only the metadata part). Only failures without a status — network errors — fall back to a plain text result describing the connectivity problem.
 
 > Why not return all bodies as data parts? Copilot Chat forwards only text parts and image data parts from tool results into the model prompt; other `LanguageModelDataPart`s are silently dropped (microsoft/vscode#275300). Spill files are the only way non-image binaries can reach the agent at all.
 
