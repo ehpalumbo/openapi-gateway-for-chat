@@ -68,8 +68,10 @@ class FakeMemento implements vscode.Memento {
  * The uniform tool-result shape under test (R-RESP-1): part one is the
  * response metadata as plain text mimicking the raw HTTP head (bare status
  * line, headers in arrival order lower-case, blank line — `statusLine\nh: v\n\n`);
- * part two is the body — a text part for textual bodies and spill references,
- * or an image data part for vision-safe image MIME types.
+ * part two — when present — is the body: a text part for textual bodies and
+ * spill references, or an image data part for vision-safe image MIME types.
+ * Responses without a body (strict `byteLength===0`, e.g. `204`, empty `404`)
+ * return only the metadata part.
  */
 interface InvokeOutcome {
 	metadata: { status?: number; statusLine?: string; headers?: Record<string, string> };
@@ -118,6 +120,20 @@ async function invoke(name: string, input: Record<string, unknown>): Promise<Inv
 	return { metadata, rawMetadata, imageDataPart: bodyPart as vscode.LanguageModelDataPart };
 }
 
+async function invokeExpectSinglePart(name: string, input: Record<string, unknown>): Promise<InvokeOutcome> {
+	const result = await vscode.lm.invokeTool(
+		name,
+		{ input, toolInvocationToken: undefined },
+		new vscode.CancellationTokenSource().token
+	);
+	assert.strictEqual(result.content.length, 1, 'expected exactly one part (metadata only) for empty body');
+	assert.ok(result.content[0] instanceof vscode.LanguageModelTextPart, 'single part must be a text part');
+	const rawMetadata = (result.content[0] as vscode.LanguageModelTextPart).value;
+	assert.ok(rawMetadata.endsWith('\n\n'), 'metadata must end with blank line (statusLine\\nheaders\\n\\n)');
+	const metadata = parseResponseHead(rawMetadata);
+	return { metadata, rawMetadata };
+}
+
 /**
  * Drives `gateway_invoke_operation` end-to-end against an ephemeral local
  * HTTP server: the suite asserts the server receives exactly the request the
@@ -163,6 +179,16 @@ suite('Invocation flow', () => {
 				if (req.url === '/report.pdf') {
 					res.writeHead(200, { 'content-type': 'application/pdf' });
 					res.end(Buffer.from(REPORT_PDF));
+					return;
+				}
+				if (req.url === '/empty/204') {
+					res.writeHead(204);
+					res.end();
+					return;
+				}
+				if (req.url === '/empty/404') {
+					res.writeHead(404);
+					res.end();
 					return;
 				}
 				if (req.method === 'POST' && req.url === '/pets') {
@@ -357,6 +383,35 @@ suite('Invocation flow', () => {
 		assert.strictEqual(metadata.status, 500);
 		assert.match(metadata.statusLine ?? '', /^500/);
 		assert.strictEqual(bodyText, 'kaboom');
+	});
+
+	test('a 204 response without body returns only metadata, no body part or spill file', async () => {
+		const beforeFiles = fs.existsSync(spillDir) ? fs.readdirSync(spillDir).length : 0;
+		const { metadata, rawMetadata } = await invokeExpectSinglePart('gateway_invoke_operation', {
+			apiId: 'echo',
+			operationId: 'getNoContent',
+		});
+
+		assert.strictEqual(metadata.status, 204);
+		assert.match(metadata.statusLine ?? '', /^204/);
+		assert.ok(rawMetadata.endsWith('\n\n'), 'metadata must end with blank line');
+		assert.strictEqual(metadata.headers?.['content-type'], undefined, '204 without body should not carry a content-type spill');
+		const afterFiles = fs.existsSync(spillDir) ? fs.readdirSync(spillDir).length : 0;
+		assert.strictEqual(afterFiles, beforeFiles, '204 without body must not create a spill file');
+	});
+
+	test('a 404 response without body returns only metadata, no body part or spill file', async () => {
+		const beforeFiles = fs.existsSync(spillDir) ? fs.readdirSync(spillDir).length : 0;
+		const { metadata, rawMetadata } = await invokeExpectSinglePart('gateway_invoke_operation', {
+			apiId: 'echo',
+			operationId: 'getEmptyNotFound',
+		});
+
+		assert.strictEqual(metadata.status, 404);
+		assert.match(metadata.statusLine ?? '', /^404/);
+		assert.ok(rawMetadata.endsWith('\n\n'), 'metadata must end with blank line');
+		const afterFiles = fs.existsSync(spillDir) ? fs.readdirSync(spillDir).length : 0;
+		assert.strictEqual(afterFiles, beforeFiles, 'empty 404 must not create a spill file');
 	});
 
 	test('cleanup removes every spilled file from the spill directory', async () => {
