@@ -6,16 +6,18 @@
  * Errors — network failure, non-2xx responses, builder validation — are
  * returned as structured results instead of throwing so the model can reason
  * about retry or correction (R-INV-5). Every response carrying an HTTP status
- * is served as a uniform two-part result (R-RESP-1): a metadata text part
- * with the raw HTTP head (bare status line, headers in arrival order, blank
- * line — e.g. `200 OK\ncontent-type: application/json\n\n`) followed by the
- * body. Bodies are routed by content type (R-RESP-3): textual ones as a text
- * part with the UTF-8 body, vision-safe images as an image
- * `LanguageModelDataPart`, and non-image binaries spilled to disk under
- * `<storageUri>/response-spills/` with a text part referencing the absolute
- * path — Copilot only forwards text parts and image data parts from tool
- * results into the model prompt (see microsoft/vscode#275300). Only failures
- * without a status — network errors — fall back to a plain single-text result.
+ * is served as a metadata text part with the raw HTTP head (bare status line,
+ * headers in arrival order, blank line — e.g. `200 OK\ncontent-type:
+ * application/json\n\n`) that is always present (R-RESP-1), followed — only
+ * when the response has a body — by the body routed by content type
+ * (R-RESP-3): textual ones as a text part with the UTF-8 body, vision-safe
+ * images as an image `LanguageModelDataPart`, and non-image binaries spilled
+ * to disk under `<storageUri>/response-spills/` with a text part referencing
+ * the absolute path — Copilot only forwards text parts and image data parts
+ * from tool results into the model prompt (see microsoft/vscode#275300).
+ * Responses without a body (e.g. `204`, empty `404`) return only the metadata
+ * part. Only failures without a status — network errors — fall back to a plain
+ * single-text result.
  *
  * The host validates `options.input` against the `inputSchema` declared in
  * package.json before dispatching (`vscode.d.ts:21166`), so inputs are
@@ -209,11 +211,13 @@ async function executeOperation(
 }
 
 /**
- * Serves any response that carries an HTTP status as a uniform two-part
- * result (R-RESP-1): a metadata text part first (raw HTTP head: bare status
- * line, headers, blank line), then the body routed by content type
- * (R-RESP-3). Non-2xx statuses are not special-cased — the model reads the
- * status from the metadata part.
+ * Serves any response that carries an HTTP status as a metadata text part
+ * first (raw HTTP head: bare status line, headers, blank line — R-RESP-1,
+ * always present), then — only when the response has a body — the body routed
+ * by content type (R-RESP-3). When the body is empty (strict `byteLength===0`,
+ * e.g. `204`, empty `404`) only the metadata part is returned. Non-2xx
+ * statuses are not special-cased — the model reads the status from the
+ * metadata part.
  */
 async function serveResponse(
 	entry: RegistryEntry,
@@ -224,10 +228,14 @@ async function serveResponse(
 	const headers = headersToRecord(response.headers);
 	const statusLine = `${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
 	const bytes = new Uint8Array(await response.arrayBuffer());
-	const mimeType = headers['content-type'] ?? DEFAULT_MIME_TYPE;
-	const baseMimeType = mimeType.split(';')[0].trim().toLowerCase();
 	const metadataPart = new vscode.LanguageModelTextPart(formatResponseHead(statusLine, headers));
 
+	if (bytes.length === 0) {
+		return new vscode.LanguageModelToolResult([metadataPart]);
+	}
+
+	const mimeType = headers['content-type'] ?? DEFAULT_MIME_TYPE;
+	const baseMimeType = mimeType.split(';')[0].trim().toLowerCase();
 	if (isSupportedImageContentType(baseMimeType)) {
 		return new vscode.LanguageModelToolResult([metadataPart, new vscode.LanguageModelDataPart(bytes, baseMimeType)]);
 	}

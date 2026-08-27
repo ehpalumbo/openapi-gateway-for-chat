@@ -117,6 +117,30 @@
           }
         }
       }
+    },
+    "/empty/204": {
+      "get": {
+        "tags": ["empty"],
+        "operationId": "getNoContent",
+        "summary": "Returns 204 No Content without body",
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        }
+      }
+    },
+    "/empty/404": {
+      "get": {
+        "tags": ["empty"],
+        "operationId": "getEmptyNotFound",
+        "summary": "Returns 404 without body",
+        "responses": {
+          "404": {
+            "description": "Empty not found"
+          }
+        }
+      }
     }
   }
 }
