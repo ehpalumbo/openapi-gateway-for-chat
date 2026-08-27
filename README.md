@@ -1,5 +1,7 @@
 # OpenAPI Gateway for Chat
 
+[![CI](https://github.com/ehpalumbo/openapi-gateway-for-chat/actions/workflows/ci.yml/badge.svg)](https://github.com/ehpalumbo/openapi-gateway-for-chat/actions/workflows/ci.yml)
+
 Expose remote REST APIs to AI agents in VS Code as native language model tools. Register APIs with OpenAPI 3.0/3.1 specifications via extension commands; the extension registers language model tools (`vscode.lm`) that let Copilot Chat agents and other language model consumers progressively discover and invoke those APIs.
 
 ## Why this extension exists
