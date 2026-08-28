@@ -101,6 +101,13 @@ function parseResponseHead(text: string): { status?: number; statusLine?: string
 	return { status: Number.isNaN(status) ? undefined : status, statusLine, headers };
 }
 
+/** Extracts the absolute spill path, which is the notice line ending with a file extension. */
+function spillPathLine(text: string): string {
+	const line = text.split('\n').find((candidate) => /\.\w+$/.test(candidate.trim()));
+	assert.ok(line, 'spill notice must contain a file path line');
+	return line.trim();
+}
+
 async function invoke(name: string, input: Record<string, unknown>): Promise<InvokeOutcome> {
 	const result = await vscode.lm.invokeTool(
 		name,
@@ -291,26 +298,26 @@ suite('Invocation flow', () => {
 		for (const outcome of [first, second]) {
 			assert.strictEqual(outcome.metadata.status, 200);
 			assert.match(outcome.metadata.headers?.['content-type'] ?? '', /application\/pdf/);
-			const spill = JSON.parse(outcome.bodyText ?? '{}') as {
-				contentType?: string;
-				byteSize?: number;
-				filePath?: string;
-				hint?: string;
-			};
-			assert.strictEqual(spill.contentType, 'application/pdf');
-			assert.strictEqual(spill.byteSize, REPORT_PDF.byteLength);
-			assert.match(spill.filePath ?? '', /\.pdf$/, 'PDF spills keep the .pdf extension');
-			assert.match(spill.hint ?? '', /open the file/i);
-			assert.ok(fs.existsSync(spill.filePath ?? ''), 'spilled file must exist on disk');
+			const notice = outcome.bodyText ?? '';
+			assert.ok(
+				notice.startsWith('[gateway notice, not API response content]'),
+				'spill notice must be framed as non-response content'
+			);
+			assert.match(notice, /application\/pdf;/);
+			assert.match(notice, new RegExp(`${REPORT_PDF.byteLength} bytes`));
+			const filePath = spillPathLine(notice);
+			assert.match(filePath, /\.pdf$/, 'PDF spills keep the .pdf extension');
+			assert.match(notice, /open the file/i);
+			assert.ok(fs.existsSync(filePath), 'spilled file must exist on disk');
 			assert.deepStrictEqual(
-				new Uint8Array(fs.readFileSync(spill.filePath ?? '')),
+				new Uint8Array(fs.readFileSync(filePath)),
 				REPORT_PDF,
 				'spilled bytes must match the served body'
 			);
 		}
-		const firstPath = JSON.parse(first.bodyText ?? '{}') as { filePath?: string };
-		const secondPath = JSON.parse(second.bodyText ?? '{}') as { filePath?: string };
-		assert.notStrictEqual(firstPath.filePath, secondPath.filePath, 'repeated spills must never override each other');
+		const firstPath = spillPathLine(first.bodyText ?? '');
+		const secondPath = spillPathLine(second.bodyText ?? '');
+		assert.notStrictEqual(firstPath, secondPath, 'repeated spills must never override each other');
 	});
 
 	test('missing required path param fails fast without any network traffic', async () => {
