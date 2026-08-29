@@ -200,7 +200,7 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
     "test:integration": "vscode-test",
-    "test:unit": "mocha --ui tdd out/test/core/**/*.test.js",
+    "test:unit": "mocha --ui tdd out/test/domain/**/*.test.js out/test/application/**/*.test.js",
     "test": "npm run test:unit && npm run test:integration"
   },
   "devDependencies": {

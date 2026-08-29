@@ -2,18 +2,18 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { parseSpec } from '../core/openapi';
-import { buildApiModel } from '../core/operations';
-import { ApiRegistration } from '../core/types';
-import { ApiRegistry } from '../store/registry';
-import { ToolContext } from '../vscode/tools/context';
+import { DiscoveryUseCases, InvokeOperationUseCase, TokenStore } from '../application';
+import { ApiRegistration, buildApiModel, parseSpec } from '../domain';
 import {
 	createDescribeApiTool,
 	createDescribeOperationTool,
 	createListApisTool,
 	createListOperationsTool,
-} from '../vscode/tools/discovery';
-import { registerGatewayTools } from '../vscode/tools';
+	FetchHttpClient,
+	MementoApiRegistry,
+	registerGatewayTools,
+	ToolContext,
+} from '../infrastructure';
 
 /** The four read-only discovery tools contributed in package.json. */
 const DISCOVERY_TOOL_NAMES = [
@@ -49,7 +49,11 @@ class FakeMemento implements vscode.Memento {
 	}
 }
 
-const noTokens = { getToken: () => Promise.resolve(undefined) };
+const noTokens: TokenStore = {
+	getToken: () => Promise.resolve(undefined),
+	setToken: () => Promise.resolve(),
+	deleteToken: () => Promise.resolve(),
+};
 
 /** Discovery tools never spill; a stub keeps the required context shape. */
 const noSpills = {
@@ -86,7 +90,7 @@ async function invoke(tool: vscode.LanguageModelTool<unknown>, input: Record<str
  * response must come purely from the registry snapshot (NFR-4).
  */
 suite('Discovery flow', () => {
-	let registry: ApiRegistry;
+	let registry: MementoApiRegistry;
 	let context: ToolContext;
 	let listApisTool: vscode.LanguageModelTool<unknown>;
 	let describeApiTool: vscode.LanguageModelTool<unknown>;
@@ -94,8 +98,10 @@ suite('Discovery flow', () => {
 	let describeOperationTool: vscode.LanguageModelTool<unknown>;
 
 	suiteSetup(() => {
-		registry = new ApiRegistry(new FakeMemento());
-		context = { registry, tokens: noTokens, spills: noSpills };
+		registry = new MementoApiRegistry(new FakeMemento());
+		const discoveryUseCases = new DiscoveryUseCases(registry);
+		const invokeUseCase = new InvokeOperationUseCase(registry, noTokens, new FetchHttpClient());
+		context = { registry, tokens: noTokens, spills: noSpills, discoveryUseCases, invokeUseCase };
 		listApisTool = createListApisTool(context);
 		describeApiTool = createDescribeApiTool(context);
 		listOperationsTool = createListOperationsTool(context);
@@ -170,13 +176,26 @@ suite('Discovery flow', () => {
 		}
 	});
 
-	test('unknown group errors enumerate the valid group names', async () => {
-		const payload = (await invoke(listOperationsTool, { apiId: 'catalog', groups: ['nope'] })) as {
-			error: string;
+	test('unknown group returns empty operations and correction hints', async () => {
+		// All-unknown: operations empty, unknownGroups set
+		const unknownOnly = (await invoke(listOperationsTool, { apiId: 'catalog', groups: ['nope'] })) as {
+			operations: unknown[];
+			unknownGroups: string[];
 			availableGroups: string[];
 		};
-		assert.match(payload.error, /Unknown group\(s\): nope/);
-		assert.deepStrictEqual(payload.availableGroups, ['admin', 'items']);
+		assert.deepStrictEqual(unknownOnly.operations, []);
+		assert.deepStrictEqual(unknownOnly.unknownGroups, ['nope']);
+		assert.deepStrictEqual(unknownOnly.availableGroups, ['admin', 'items']);
+
+		// Mixed: matched operations returned alongside the correction hints
+		const mixed = (await invoke(listOperationsTool, { apiId: 'catalog', groups: ['items', 'nope'] })) as {
+			operations: { operationId: string }[];
+			unknownGroups: string[];
+			availableGroups: string[];
+		};
+		assert.deepStrictEqual(mixed.operations.map((op) => op.operationId), ['createItem']);
+		assert.deepStrictEqual(mixed.unknownGroups, ['nope']);
+		assert.deepStrictEqual(mixed.availableGroups, ['admin', 'items']);
 	});
 
 	test('after unregistering, tools report the empty-registry error instead of throwing', async () => {
