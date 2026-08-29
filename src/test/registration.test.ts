@@ -3,18 +3,25 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { parseSpec, SpecError } from '../core/openapi';
-import { ApiRegistration, SpecSource } from '../core/types';
-import { ApiRegistry } from '../store/registry';
-import { TokenStore } from '../store/secrets';
 import {
 	createRegistration,
-	loadSpecFromSource,
+	RefreshApisUseCase,
+	RegisterApiUseCase,
 	resolveBaseUrlSuggestion,
 	slugifyTitle,
-} from '../vscode/commands/common';
-import { CommandContext, refreshAll } from '../vscode/commands/index';
-import { fetchWithLimit, ProtocolNotAllowedError, SizeLimitExceededError } from '../vscode/http';
+	UnregisterApiUseCase,
+} from '../application';
+import { ApiRegistration, parseSpec, SpecError, SpecSource } from '../domain';
+import {
+	CommandContext,
+	FetchSpecLoader,
+	fetchWithLimit,
+	MementoApiRegistry,
+	ProtocolNotAllowedError,
+	refreshAll,
+	SecretTokenStore,
+	SizeLimitExceededError,
+} from '../infrastructure';
 
 const FIXTURES = path.resolve(__dirname, '../../src/test/fixtures');
 
@@ -140,8 +147,9 @@ suite('Registration flows', () => {
 
 	test('URL registration end-to-end persists and is visible to a fresh registry over the same state', async () => {
 		const memento = new FakeMemento();
-		const registry = new ApiRegistry(memento);
-		const text = await loadSpecFromSource({ kind: 'url', url: specServer.url('/petstore30.json') });
+		const registry = new MementoApiRegistry(memento);
+		const specLoader = new FetchSpecLoader();
+		const text = await specLoader.load({ kind: 'url', url: specServer.url('/petstore30.json') });
 		const source: SpecSource = { kind: 'url', url: specServer.url('/petstore30.json') };
 		const registration = createRegistration(text, 'petstore', 'https://petstore.example.com/v1', source);
 
@@ -151,7 +159,7 @@ suite('Registration flows', () => {
 		assert.strictEqual(upsert.status, 'created');
 		assert.strictEqual(registry.getEntry('petstore')?.index.size, 4);
 
-		const fresh = new ApiRegistry(memento);
+		const fresh = new MementoApiRegistry(memento);
 		const persisted = fresh.get('petstore');
 		assert.ok(persisted, 'registration should survive a fresh registry bound to the same memento');
 		const freshEntry = fresh.getEntry('petstore');
@@ -164,7 +172,7 @@ suite('Registration flows', () => {
 
 	test('upsert with an existing apiId returns a conflict without mutating state', () => {
 		const memento = new FakeMemento();
-		const registry = new ApiRegistry(memento);
+		const registry = new MementoApiRegistry(memento);
 		const text = readFixture('petstore30.json');
 		const first = createRegistration(text, 'dupe', 'https://a.example.com', { kind: 'file', fsPath: 'a.json' });
 		const second = createRegistration(text, 'dupe', 'https://b.example.com', { kind: 'file', fsPath: 'b.json' });
@@ -192,12 +200,29 @@ suite('Registration flows', () => {
 	});
 
 	test('refresh failure retention with mixed sources', async () => {
-		const registry = new ApiRegistry(new FakeMemento());
-		const tokens = new TokenStore(new FakeSecretStorage());
-		const ctx: CommandContext = { registry, tokens, onChange: () => undefined };
+		const registry = new MementoApiRegistry(new FakeMemento());
+		const tokens = new SecretTokenStore(new FakeSecretStorage());
+		const updatedText = readFixture('petstore30.json').replace('"version": "1.0.0"', '"version": "9.9.9"');
+		const specLoader = {
+			load: async (source: SpecSource) => {
+				if (source.kind === 'file') {
+					throw new Error(`cannot read ${source.fsPath}`);
+				}
+				return updatedText;
+			},
+		};
+		const refreshUseCase = new RefreshApisUseCase(registry, specLoader);
+		const ctx: CommandContext = {
+			registry,
+			tokens,
+			specLoader,
+			registerUseCase: new RegisterApiUseCase(registry, tokens),
+			unregisterUseCase: new UnregisterApiUseCase(registry, tokens),
+			refreshUseCase,
+			onChange: () => undefined,
+		};
 
 		const petstoreUrl = specServer.url('/petstore30.json');
-		const updatedText = readFixture('petstore30.json').replace('"version": "1.0.0"', '"version": "9.9.9"');
 		const okReg: ApiRegistration = createRegistration(readFixture('petstore30.json'), 'ok-api', 'https://ok.example.com', {
 			kind: 'url',
 			url: petstoreUrl,
@@ -209,21 +234,16 @@ suite('Registration flows', () => {
 		registry.upsert(okReg);
 		registry.upsert(deadReg);
 
-		const failures = await refreshAll(ctx, async (source) => {
-			if (source.kind === 'file') {
-				throw new Error(`cannot read ${source.fsPath}`);
-			}
-			return updatedText;
-		});
+		const failures = await refreshAll(ctx);
 
 		assert.deepStrictEqual(failures.map((f) => f.split(':')[0]), ['dead-api']);
 		assert.strictEqual(registry.get('dead-api')?.snapshot.document.info.version, '1.0.0');
 		assert.strictEqual(registry.get('ok-api')?.snapshot.document.info.version, '9.9.9');
 	});
 
-	test('TokenStore round-trips under the apiId key scheme only', async () => {
+	test('SecretTokenStore round-trips under the apiId key scheme only', async () => {
 		const secrets = new FakeSecretStorage();
-		const tokens = new TokenStore(secrets);
+		const tokens = new SecretTokenStore(secrets);
 		await tokens.setToken('petstore', 's3cret');
 		assert.strictEqual(await tokens.getToken('petstore'), 's3cret');
 		await tokens.deleteToken('petstore');

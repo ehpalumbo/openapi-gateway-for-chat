@@ -4,13 +4,16 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { parseSpec } from '../core/openapi';
-import { buildApiModel } from '../core/operations';
-import { ApiRegistration } from '../core/types';
-import { ApiRegistry } from '../store/registry';
-import { createInvokeOperationTool } from '../vscode/tools/invocation';
-import { registerGatewayTools } from '../vscode/tools';
-import { WorkspaceSpillStore } from '../vscode/spills';
+import { DiscoveryUseCases, InvokeOperationUseCase, TokenStore } from '../application';
+import { ApiRegistration, buildApiModel, parseSpec } from '../domain';
+import {
+	createInvokeOperationTool,
+	FetchHttpClient,
+	MementoApiRegistry,
+	registerGatewayTools,
+	ToolContext,
+	WorkspaceSpillStore,
+} from '../infrastructure';
 
 const FIXTURES = path.resolve(__dirname, '../../src/test/fixtures');
 const TOKEN = 's3cr3t-do-not-echo';
@@ -148,9 +151,10 @@ async function invokeExpectSinglePart(name: string, input: Record<string, unknow
  * every HTTP response is served as uniform metadata + body data parts.
  */
 suite('Invocation flow', () => {
-	let registry: ApiRegistry;
-	let tokens: { setToken(apiId: string, token: string): Promise<void>; getToken(apiId: string): Promise<string | undefined> };
+	let registry: MementoApiRegistry;
+	let tokens: TokenStore;
 	let spills: WorkspaceSpillStore;
+	let toolContext: ToolContext;
 	let spillDir: string;
 	let server: http.Server;
 	let baseUrl: string;
@@ -224,9 +228,10 @@ suite('Invocation flow', () => {
 		const stored = new Map<string, string>();
 		tokens = {
 			setToken: async (apiId, token) => void stored.set(apiId, token),
+			deleteToken: async (apiId) => void stored.delete(apiId),
 			getToken: async (apiId) => stored.get(apiId),
 		};
-		registry = new ApiRegistry(new FakeMemento());
+		registry = new MementoApiRegistry(new FakeMemento());
 		registry.upsert(registration);
 
 		// A real store over an isolated tmpdir exercises the production
@@ -235,7 +240,10 @@ suite('Invocation flow', () => {
 		spillDir = path.join(storageRoot, 'response-spills');
 		spills = new WorkspaceSpillStore(vscode.Uri.file(storageRoot));
 
-		registerGatewayTools({ registry, tokens, spills });
+		const discoveryUseCases = new DiscoveryUseCases(registry);
+		const invokeUseCase = new InvokeOperationUseCase(registry, tokens, new FetchHttpClient());
+		toolContext = { registry, tokens, spills, discoveryUseCases, invokeUseCase };
+		registerGatewayTools(toolContext);
 	});
 
 	suiteTeardown(async () => {
@@ -340,7 +348,7 @@ suite('Invocation flow', () => {
 	});
 
 	test('prepareInvocation confirms non-safe methods with URL and redacted auth, safe methods not at all', async () => {
-		const invokeTool = createInvokeOperationTool({ registry, tokens, spills });
+		const invokeTool = createInvokeOperationTool(toolContext);
 
 		await tokens.setToken('echo', TOKEN);
 

@@ -1,35 +1,67 @@
 import * as vscode from 'vscode';
-import { ApiRegistry } from './store/registry';
-import { TokenStore } from './store/secrets';
-import { CommandContext, refreshAll, registerApiCommands } from './vscode/commands/index';
-import { WorkspaceSpillStore, SpillStore } from './vscode/spills';
-import { registerGatewayTools, ToolContext } from './vscode/tools';
+import {
+	DiscoveryUseCases,
+	InvokeOperationUseCase,
+	RefreshApisUseCase,
+	RegisterApiUseCase,
+	SpillStore,
+	UnregisterApiUseCase,
+} from './application';
+import {
+	CommandContext,
+	FetchHttpClient,
+	FetchSpecLoader,
+	MementoApiRegistry,
+	refreshAll,
+	registerApiCommands,
+	registerGatewayTools,
+	SecretTokenStore,
+	ToolContext,
+	WorkspaceSpillStore,
+} from './infrastructure';
 
 /** Kept at module scope so `deactivate` can clean up spills after teardown. */
 let spillStore: SpillStore | undefined;
 
-export function activate(context: vscode.ExtensionContext) {
-	const registry = new ApiRegistry(context.globalState);
-	const tokens = new TokenStore(context.secrets);
-	spillStore = new WorkspaceSpillStore(context.storageUri ?? context.globalStorageUri);
+export function activate({ globalState, secrets, storageUri, globalStorageUri, subscriptions }: vscode.ExtensionContext) {
+	// 1. Infrastructure Adapters
+	const registry = new MementoApiRegistry(globalState);
+	const tokens = new SecretTokenStore(secrets);
+	spillStore = new WorkspaceSpillStore(storageUri ?? globalStorageUri);
+	const httpClient = new FetchHttpClient();
+	const specLoader = new FetchSpecLoader();
 
-	// Tools re-register on every registry change so discovery always reflects
-	// the current snapshot set (NFR-4): dispose the previous set first.
-	const toolContext: ToolContext = { registry, tokens, spills: spillStore };
+	// 2. Application Use Cases
+	const registerUseCase = new RegisterApiUseCase(registry, tokens);
+	const unregisterUseCase = new UnregisterApiUseCase(registry, tokens);
+	const refreshUseCase = new RefreshApisUseCase(registry, specLoader);
+	const discoveryUseCases = new DiscoveryUseCases(registry);
+	const invokeUseCase = new InvokeOperationUseCase(registry, tokens, httpClient);
+
+	// 3. Presentation / Framework Adapters (Tools & Commands)
+	const toolContext: ToolContext = {
+		registry,
+		tokens,
+		spills: spillStore,
+		discoveryUseCases,
+		invokeUseCase,
+	};
 	let toolDisposables = registerGatewayTools(toolContext);
 
 	const commandContext: CommandContext = {
 		registry,
 		tokens,
+		specLoader,
+		registerUseCase,
+		unregisterUseCase,
+		refreshUseCase,
 		onChange: (): void => {
 			toolDisposables.forEach((disposable) => disposable.dispose());
 			toolDisposables = registerGatewayTools(toolContext);
 		},
 	};
 
-	// Disposing this subscription tears down whichever tool set is current,
-	// because the closure re-reads `toolDisposables` at dispose time.
-	context.subscriptions.push(
+	subscriptions.push(
 		...registerApiCommands(commandContext),
 		vscode.Disposable.from({
 			dispose: () => {
@@ -38,8 +70,8 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
-	void refreshAll(commandContext).catch((err: unknown) => {
-		void vscode.window.showErrorMessage(
+	refreshAll(commandContext).catch((err: unknown) => {
+		vscode.window.showErrorMessage(
 			`OpenAPI Gateway: initial refresh failed: ${err instanceof Error ? err.message : String(err)}`
 		);
 	});
