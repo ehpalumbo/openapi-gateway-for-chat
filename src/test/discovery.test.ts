@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DiscoveryUseCases, InvokeOperationUseCase, TokenStore } from '../application';
@@ -92,14 +93,16 @@ async function invoke(tool: vscode.LanguageModelTool<unknown>, input: Record<str
  */
 suite('Discovery flow', () => {
 	let registry: FileBackedApiRegistry;
+	let registryStorageDir: string;
 	let context: ToolContext;
 	let listApisTool: vscode.LanguageModelTool<unknown>;
 	let describeApiTool: vscode.LanguageModelTool<unknown>;
 	let listOperationsTool: vscode.LanguageModelTool<unknown>;
 	let describeOperationTool: vscode.LanguageModelTool<unknown>;
 
-	suiteSetup(() => {
-		registry = new FileBackedApiRegistry(new FakeMemento());
+	suiteSetup(async () => {
+		registryStorageDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openapi-gateway-registry-'));
+		registry = new FileBackedApiRegistry(new FakeMemento(), vscode.Uri.file(registryStorageDir));
 		const discoveryUseCases = new DiscoveryUseCases(registry);
 		const invokeUseCase = new InvokeOperationUseCase(registry, noTokens, new FetchHttpClient());
 		context = { registry, tokens: noTokens, spills: noSpills, discoveryUseCases, invokeUseCase };
@@ -107,6 +110,12 @@ suite('Discovery flow', () => {
 		describeApiTool = createDescribeApiTool(context);
 		listOperationsTool = createListOperationsTool(context);
 		describeOperationTool = createDescribeOperationTool(context);
+	});
+
+	suiteTeardown(async () => {
+		if (registryStorageDir) {
+			await fs.promises.rm(registryStorageDir, { recursive: true, force: true });
+		}
 	});
 
 	test('registerGatewayTools binds every contributed name in vscode.lm.tools', () => {

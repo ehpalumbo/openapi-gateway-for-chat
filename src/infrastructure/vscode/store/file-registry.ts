@@ -20,59 +20,16 @@ function sanitizeApiId(apiId: string): string {
 	return apiId.replace(/[^a-zA-Z0-9._-]/g, '-');
 }
 
-type Fs = Pick<typeof vscode.workspace.fs, 'readFile' | 'writeFile' | 'delete' | 'createDirectory'>;
-
-function createInMemoryFs(store: Map<string, Uint8Array>): Fs {
-	return {
-		async readFile(uri: vscode.Uri): Promise<Uint8Array> {
-			const key = uri.fsPath ?? uri.path;
-			const data = store.get(key);
-			if (!data) {
-				throw new Error(`File not found: ${key}`);
-			}
-			return data;
-		},
-		async writeFile(uri: vscode.Uri, content: Uint8Array): Promise<void> {
-			store.set(uri.fsPath ?? uri.path, content);
-		},
-		async delete(uri: vscode.Uri): Promise<void> {
-			store.delete(uri.fsPath ?? uri.path);
-		},
-		async createDirectory(): Promise<void> {
-			// no-op for in-memory
-		},
-	};
-}
-
-const fallbackFsPerMemento = new WeakMap<vscode.Memento, Map<string, Uint8Array>>();
-
 export class FileBackedApiRegistry implements ApiRegistry {
 	private readonly index = new Map<string, ApiIndexEntry>();
 	private readonly cache = new Map<string, RegistryEntry>();
 	private readonly registrationsDir: vscode.Uri;
-	private readonly fs: Fs;
 
 	constructor(
 		private readonly memento: vscode.Memento,
-		globalStorageUri?: vscode.Uri,
-		fs?: Fs,
+		private readonly globalStorageUri: vscode.Uri,
 	) {
-		if (globalStorageUri && fs) {
-			this.fs = fs;
-			this.registrationsDir = vscode.Uri.joinPath(globalStorageUri, REGISTRATIONS_DIR);
-		} else if (globalStorageUri) {
-			this.fs = vscode.workspace.fs;
-			this.registrationsDir = vscode.Uri.joinPath(globalStorageUri, REGISTRATIONS_DIR);
-		} else {
-			let store = fallbackFsPerMemento.get(memento);
-			if (!store) {
-				store = new Map<string, Uint8Array>();
-				fallbackFsPerMemento.set(memento, store);
-			}
-			this.fs = createInMemoryFs(store);
-			// fallback directory is virtual; use a fixed uri per memento
-			this.registrationsDir = vscode.Uri.file('/tmp/openapi-gateway-fallback-registrations');
-		}
+		this.registrationsDir = vscode.Uri.joinPath(globalStorageUri, REGISTRATIONS_DIR);
 		this.loadIndexFromMemento();
 	}
 
@@ -148,7 +105,7 @@ export class FileBackedApiRegistry implements ApiRegistry {
 		this.cache.delete(apiId);
 		await this.persistIndex();
 		try {
-			await this.fs.delete(this.fileUriFor(apiId), { useTrash: false });
+			await vscode.workspace.fs.delete(this.fileUriFor(apiId), { useTrash: false });
 		} catch {
 			// file may not exist — best effort
 		}
@@ -179,19 +136,19 @@ export class FileBackedApiRegistry implements ApiRegistry {
 
 	private async writeRegistrationFile(registration: ApiRegistration): Promise<void> {
 		try {
-			await this.fs.createDirectory(this.registrationsDir);
+			await vscode.workspace.fs.createDirectory(this.registrationsDir);
 		} catch {
 			// directory may already exist
 		}
 		const fileUri = this.fileUriFor(registration.apiId);
 		const data = Buffer.from(JSON.stringify(registration), 'utf8');
-		await this.fs.writeFile(fileUri, data);
+		await vscode.workspace.fs.writeFile(fileUri, data);
 	}
 
 	private async readRegistrationFile(apiId: string): Promise<ApiRegistration | undefined> {
 		try {
 			const fileUri = this.fileUriFor(apiId);
-			const bytes = await this.fs.readFile(fileUri);
+			const bytes = await vscode.workspace.fs.readFile(fileUri);
 			const text = Buffer.from(bytes).toString('utf8');
 			const parsed = JSON.parse(text) as ApiRegistration;
 			// basic validation: must have apiId and snapshot.model

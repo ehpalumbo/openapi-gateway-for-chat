@@ -152,6 +152,7 @@ async function invokeExpectSinglePart(name: string, input: Record<string, unknow
  */
 suite('Invocation flow', () => {
 	let registry: FileBackedApiRegistry;
+	let registryStorageDir: string;
 	let tokens: TokenStore;
 	let spills: WorkspaceSpillStore;
 	let toolContext: ToolContext;
@@ -232,7 +233,8 @@ suite('Invocation flow', () => {
 			deleteToken: async (apiId) => void stored.delete(apiId),
 			getToken: async (apiId) => stored.get(apiId),
 		};
-		registry = new FileBackedApiRegistry(new FakeMemento());
+		registryStorageDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openapi-gateway-registry-'));
+		registry = new FileBackedApiRegistry(new FakeMemento(), vscode.Uri.file(registryStorageDir));
 		await registry.upsert(registration);
 
 		// A real store over an isolated tmpdir exercises the production
@@ -250,6 +252,14 @@ suite('Invocation flow', () => {
 	suiteTeardown(async () => {
 		await spills.cleanup();
 		await new Promise<void>((resolve) => server.close(() => resolve()));
+		if (registryStorageDir) {
+			await fs.promises.rm(registryStorageDir, { recursive: true, force: true });
+		}
+		if (spillDir) {
+			// storageRoot cleanup already via spills, but ensure registry spills dir removed
+			const storageRoot = path.dirname(spillDir);
+			await fs.promises.rm(storageRoot, { recursive: true, force: true }).catch(() => undefined);
+		}
 	});
 
 	test('successful GET round-trip sends exactly the built request', async () => {
