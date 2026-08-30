@@ -2,7 +2,7 @@ import {
 	ApiSummary,
 	buildDescribeApi,
 	buildDescribeOperation,
-	buildListApisFromIndex,
+	buildListApis,
 	buildListOperations,
 	DescribeApiResult,
 	DescribeOperationResult,
@@ -26,7 +26,7 @@ export class DiscoveryUseCases {
 		}
 		return {
 			kind: 'success',
-			data: { apis: buildListApisFromIndex(index) },
+			data: { apis: buildListApis(index) },
 		};
 	}
 

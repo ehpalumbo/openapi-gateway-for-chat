@@ -17,12 +17,12 @@ async function promptForUniqueId(ctx: CommandContext, suggested: string): Promis
 			return undefined;
 		}
 		const apiId = entered.trim();
-		if (!ctx.registry.has(apiId)) {
+		const existing = ctx.registry.list().find((entry) => entry.apiId === apiId);
+		if (!existing) {
 			return apiId;
 		}
-		const existing = ctx.registry.list().find((entry) => entry.apiId === apiId);
 		void vscode.window.showErrorMessage(
-			`An API "${apiId}" (${existing?.title ?? 'unknown'}) is already registered. Choose a different identifier.`
+			`An API "${apiId}" (${existing.title}) is already registered. Choose a different identifier.`
 		);
 		candidate = apiId;
 	}

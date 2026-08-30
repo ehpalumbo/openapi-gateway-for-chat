@@ -249,12 +249,12 @@ export interface ApiSnapshot {
 }
 
 /**
- * Lightweight index entry kept in `vscode.Memento` (`globalState`).
+ * Lightweight index entry for a registered API.
  *
  * Contains only the fields needed to serve `gateway_list_apis` and
- * registration conflict checks without loading the full {@link ApiRegistration}
- * from `globalStorage`. The full registration (with {@link ApiSnapshot})
- * is loaded on demand when `apiId` is looked up.
+ * registration conflict checks without loading the full {@link ApiRegistration}.
+ * The full registration (with {@link ApiSnapshot}) is loaded on demand when
+ * `apiId` is looked up.
  */
 export interface ApiIndexEntry {
 	/** Unique, user-chosen identifier (R-REG-8). */

@@ -10,7 +10,7 @@ import {
 	createListApisTool,
 	createListOperationsTool,
 	FetchHttpClient,
-	MementoApiRegistry,
+	FileBackedApiRegistry,
 	registerGatewayTools,
 	ToolContext,
 } from '../infrastructure';
@@ -91,7 +91,7 @@ async function invoke(tool: vscode.LanguageModelTool<unknown>, input: Record<str
  * response must come purely from the registry snapshot (NFR-4).
  */
 suite('Discovery flow', () => {
-	let registry: MementoApiRegistry;
+	let registry: FileBackedApiRegistry;
 	let context: ToolContext;
 	let listApisTool: vscode.LanguageModelTool<unknown>;
 	let describeApiTool: vscode.LanguageModelTool<unknown>;
@@ -99,7 +99,7 @@ suite('Discovery flow', () => {
 	let describeOperationTool: vscode.LanguageModelTool<unknown>;
 
 	suiteSetup(() => {
-		registry = new MementoApiRegistry(new FakeMemento());
+		registry = new FileBackedApiRegistry(new FakeMemento());
 		const discoveryUseCases = new DiscoveryUseCases(registry);
 		const invokeUseCase = new InvokeOperationUseCase(registry, noTokens, new FetchHttpClient());
 		context = { registry, tokens: noTokens, spills: noSpills, discoveryUseCases, invokeUseCase };

@@ -51,34 +51,10 @@ function jsonNormalized<T>(value: T): T {
 }
 
 /**
- * @param registrations - All registrations in the registry.
- * @returns One summary per registration (R-DISC-1).
- * @deprecated Prefer {@link buildListApisFromIndex} — listApis should not
- *             trigger lazy file loads. This overload is kept for tests that
- *             already have full registrations.
- */
-export function buildListApis(registrations: ApiRegistration[]): ApiSummary[];
-/**
- * @param indexEntries - Lightweight index entries (from Memento, no file I/O).
+ * @param indexEntries - Lightweight index entries.
  * @returns One summary per index entry (R-DISC-1).
  */
-export function buildListApis(indexEntries: ApiIndexEntry[]): ApiSummary[];
-export function buildListApis(entries: (ApiRegistration | ApiIndexEntry)[]): ApiSummary[] {
-	return entries.map((entry) =>
-		jsonNormalized({
-			apiId: entry.apiId,
-			title: entry.title,
-			version: entry.version,
-			description: 'snapshot' in entry ? entry.snapshot.model.info.description : entry.description,
-		})
-	);
-}
-
-/**
- * @param indexEntries - Lightweight index entries (from Memento, no file I/O).
- * @returns One summary per index entry (R-DISC-1).
- */
-export function buildListApisFromIndex(indexEntries: readonly ApiIndexEntry[]): ApiSummary[] {
+export function buildListApis(indexEntries: readonly ApiIndexEntry[]): ApiSummary[] {
 	return indexEntries.map(({ apiId, title, version, description }) =>
 		jsonNormalized({ apiId, title, version, description })
 	);

@@ -9,7 +9,7 @@ import { ApiRegistration, buildApiModel, parseSpec } from '../domain';
 import {
 	createInvokeOperationTool,
 	FetchHttpClient,
-	MementoApiRegistry,
+	FileBackedApiRegistry,
 	registerGatewayTools,
 	ToolContext,
 	WorkspaceSpillStore,
@@ -151,7 +151,7 @@ async function invokeExpectSinglePart(name: string, input: Record<string, unknow
  * every HTTP response is served as uniform metadata + body data parts.
  */
 suite('Invocation flow', () => {
-	let registry: MementoApiRegistry;
+	let registry: FileBackedApiRegistry;
 	let tokens: TokenStore;
 	let spills: WorkspaceSpillStore;
 	let toolContext: ToolContext;
@@ -232,7 +232,7 @@ suite('Invocation flow', () => {
 			deleteToken: async (apiId) => void stored.delete(apiId),
 			getToken: async (apiId) => stored.get(apiId),
 		};
-		registry = new MementoApiRegistry(new FakeMemento());
+		registry = new FileBackedApiRegistry(new FakeMemento());
 		await registry.upsert(registration);
 
 		// A real store over an isolated tmpdir exercises the production

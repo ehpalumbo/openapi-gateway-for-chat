@@ -23,20 +23,20 @@ export interface RegistryEntry {
 /**
  * Durable storage of API registrations and last-good snapshots (R-REG-5..7).
  *
- * The index (`list`/`has`) is kept in `vscode.Memento` and is synchronous.
- * Full registrations are stored per-API in `globalStorage` and are loaded
- * on demand — `get`/`getEntry` are `Promise`-based and cache the derived
- * {@link RegistryEntry} (model + index) after the first load for an `apiId`.
+ * The registry maintains a synchronous lightweight index (`list`/`has`) and
+ * lazy-loads full registrations on demand — `get`/`getEntry` are
+ * `Promise`-based and cache the derived {@link RegistryEntry} (model + index)
+ * after the first load for an `apiId`.
  */
 export interface ApiRegistry {
-	/** @returns Lightweight index of all registrations in insertion order (from Memento, no file I/O). */
+	/** @returns Lightweight index of all registrations in insertion order. */
 	list(): readonly ApiIndexEntry[];
 	/** @param apiId - Registration ID to check. */
 	has(apiId: string): boolean;
 
-	/** @param apiId - Registration ID to look up (lazy file load). */
+	/** @param apiId - Registration ID to look up. */
 	get(apiId: string): Promise<ApiRegistration | undefined>;
-	/** @param apiId - Registration whose runtime view is requested (lazy file load). */
+	/** @param apiId - Registration whose runtime view is requested. */
 	getEntry(apiId: string): Promise<RegistryEntry | undefined>;
 
 	upsert(registration: ApiRegistration): Promise<UpsertResult>;

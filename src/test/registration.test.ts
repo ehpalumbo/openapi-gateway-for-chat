@@ -16,7 +16,7 @@ import {
 	CommandContext,
 	FetchSpecLoader,
 	fetchWithLimit,
-	MementoApiRegistry,
+	FileBackedApiRegistry,
 	ProtocolNotAllowedError,
 	refreshAll,
 	SecretTokenStore,
@@ -147,7 +147,7 @@ suite('Registration flows', () => {
 
 	test('URL registration end-to-end persists and is visible to a fresh registry over the same state', async () => {
 		const memento = new FakeMemento();
-		const registry = new MementoApiRegistry(memento);
+		const registry = new FileBackedApiRegistry(memento);
 		const specLoader = new FetchSpecLoader();
 		const text = await specLoader.load({ kind: 'url', url: specServer.url('/petstore30.json') });
 		const source: SpecSource = { kind: 'url', url: specServer.url('/petstore30.json') };
@@ -159,7 +159,7 @@ suite('Registration flows', () => {
 		assert.strictEqual(upsert.status, 'created');
 		assert.strictEqual((await registry.getEntry('petstore'))?.index.size, 4);
 
-		const fresh = new MementoApiRegistry(memento);
+		const fresh = new FileBackedApiRegistry(memento);
 		const persisted = await fresh.get('petstore');
 		assert.ok(persisted, 'registration should survive a fresh registry bound to the same memento');
 		const freshEntry = await fresh.getEntry('petstore');
@@ -172,7 +172,7 @@ suite('Registration flows', () => {
 
 	test('upsert with an existing apiId returns a conflict without mutating state', async () => {
 		const memento = new FakeMemento();
-		const registry = new MementoApiRegistry(memento);
+		const registry = new FileBackedApiRegistry(memento);
 		const text = readFixture('petstore30.json');
 		const first = createRegistration(text, 'dupe', 'https://a.example.com', { kind: 'file', fsPath: 'a.json' });
 		const second = createRegistration(text, 'dupe', 'https://b.example.com', { kind: 'file', fsPath: 'b.json' });
@@ -201,7 +201,7 @@ suite('Registration flows', () => {
 	});
 
 	test('refresh failure retention with mixed sources', async () => {
-		const registry = new MementoApiRegistry(new FakeMemento());
+		const registry = new FileBackedApiRegistry(new FakeMemento());
 		const tokens = new SecretTokenStore(new FakeSecretStorage());
 		const updatedText = readFixture('petstore30.json').replace('"version": "1.0.0"', '"version": "9.9.9"');
 		const specLoader = {
