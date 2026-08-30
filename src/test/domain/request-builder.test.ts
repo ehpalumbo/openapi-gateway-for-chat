@@ -9,7 +9,6 @@ function registration(baseUrl: string): ApiRegistration {
 		baseUrl,
 		source: { kind: 'url', url: 'https://spec.example.com/petshop.json' },
 		snapshot: {
-			document: { openapi: '3.0.3', info: { title: 'Petshop', version: '1.0.0' }, paths: {} },
 			model: { info: { title: 'Petshop', version: '1.0.0' }, schemas: {}, groups: [] },
 		},
 	};

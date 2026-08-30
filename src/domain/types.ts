@@ -237,12 +237,38 @@ export interface ApiModel {
 /**
  * The last successfully parsed state of an API's spec, kept so registrations
  * stay usable when a later refresh fails (R-REG-7).
+ *
+ * Only the derived {@link ApiModel} is persisted — the raw
+ * {@link OpenApiDocument} is discarded after parsing. Refresh rebuilds the
+ * model by re-fetching spec text from {@link ApiRegistration.source}
+ * (R-REG-6).
  */
 export interface ApiSnapshot {
-	/** Parsed document backing the snapshot (for migration purposes) */
-	document: OpenApiDocument;
-	/** Grouped operation model derived from {@link document}. */
+	/** Grouped operation model derived from the OpenAPI document. */
 	model: ApiModel;
+}
+
+/**
+ * Lightweight index entry kept in `vscode.Memento` (`globalState`).
+ *
+ * Contains only the fields needed to serve `gateway_list_apis` and
+ * registration conflict checks without loading the full {@link ApiRegistration}
+ * from `globalStorage`. The full registration (with {@link ApiSnapshot})
+ * is loaded on demand when `apiId` is looked up.
+ */
+export interface ApiIndexEntry {
+	/** Unique, user-chosen identifier (R-REG-8). */
+	apiId: string;
+	/** Title from the spec's `info.title`. */
+	title: string;
+	/** Version from the spec's `info.version`. */
+	version: string;
+	/** Base URL selected at registration time (R-REG-9, R-INV-4). */
+	baseUrl: string;
+	/** Origin of the spec so refresh can re-fetch/re-read it (R-REG-6). */
+	source: SpecSource;
+	/** Description from `ApiModel.info.description`, denormalized for `listApis`. */
+	description?: string;
 }
 
 /**

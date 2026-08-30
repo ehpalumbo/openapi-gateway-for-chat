@@ -68,7 +68,7 @@ function registration(): ApiRegistration {
 		version: document.info.version,
 		baseUrl: 'https://things.example.com',
 		source: { kind: 'file', fsPath: 'things.json' } as SpecSource,
-		snapshot: { document, model: buildApiModel(document) },
+		snapshot: { model: buildApiModel(document) },
 	};
 }
 

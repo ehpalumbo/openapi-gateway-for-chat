@@ -13,7 +13,7 @@ export class UnregisterApiUseCase {
 	 * @returns Whether the API was found and removed.
 	 */
 	async execute(apiId: string): Promise<boolean> {
-		const removed = this.registry.remove(apiId);
+		const removed = await this.registry.remove(apiId);
 		if (removed) {
 			await this.tokenStore.deleteToken(apiId);
 		}

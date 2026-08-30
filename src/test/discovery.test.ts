@@ -63,13 +63,14 @@ const noSpills = {
 
 function catalogRegistration(apiId: string): ApiRegistration {
 	const document = parseSpec(readFixture('catalog30.json'));
+	const model = buildApiModel(document);
 	return {
 		apiId,
 		title: document.info.title,
 		version: document.info.version,
 		baseUrl: 'https://catalog.example.com/v2',
 		source: { kind: 'file', fsPath: path.join(FIXTURES, 'catalog30.json') },
-		snapshot: { document, model: buildApiModel(document) },
+		snapshot: { model },
 	};
 }
 
@@ -127,8 +128,8 @@ suite('Discovery flow', () => {
 	});
 
 	test('the progressive disclosure chain works end-to-end on the fixture', async () => {
-		registry.upsert(catalogRegistration('catalog'));
-		registry.upsert(catalogRegistration('mirror'));
+		await registry.upsert(catalogRegistration('catalog'));
+		await registry.upsert(catalogRegistration('mirror'));
 
 		const listed = (await invoke(listApisTool, {})) as { apis: { apiId: string; title: string }[] };
 		assert.deepStrictEqual(
@@ -199,8 +200,8 @@ suite('Discovery flow', () => {
 	});
 
 	test('after unregistering, tools report the empty-registry error instead of throwing', async () => {
-		registry.remove('catalog');
-		registry.remove('mirror');
+		await registry.remove('catalog');
+		await registry.remove('mirror');
 
 		const listed = (await invoke(listApisTool, {})) as { error?: string };
 		assert.match(listed.error ?? '', /No APIs registered/);

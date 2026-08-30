@@ -217,13 +217,14 @@ suite('Invocation flow', () => {
 		baseUrl = `http://127.0.0.1:${address.port}`;
 
 		const document = parseSpec(readFixture('echo30.json'));
+		const model = buildApiModel(document);
 		const registration: ApiRegistration = {
 			apiId: 'echo',
 			title: document.info.title,
 			version: document.info.version,
 			baseUrl,
 			source: { kind: 'file', fsPath: path.join(FIXTURES, 'echo30.json') },
-			snapshot: { document, model: buildApiModel(document) },
+			snapshot: { model },
 		};
 		const stored = new Map<string, string>();
 		tokens = {
@@ -232,7 +233,7 @@ suite('Invocation flow', () => {
 			getToken: async (apiId) => stored.get(apiId),
 		};
 		registry = new MementoApiRegistry(new FakeMemento());
-		registry.upsert(registration);
+		await registry.upsert(registration);
 
 		// A real store over an isolated tmpdir exercises the production
 		// `workspace.fs` code paths while keeping workspace storage untouched.

@@ -155,14 +155,14 @@ suite('Registration flows', () => {
 
 		assert.strictEqual(registration.title, 'Petstore');
 		assert.strictEqual(registration.version, '1.0.0');
-		const upsert = registry.upsert(registration);
+		const upsert = await registry.upsert(registration);
 		assert.strictEqual(upsert.status, 'created');
-		assert.strictEqual(registry.getEntry('petstore')?.index.size, 4);
+		assert.strictEqual((await registry.getEntry('petstore'))?.index.size, 4);
 
 		const fresh = new MementoApiRegistry(memento);
-		const persisted = fresh.get('petstore');
+		const persisted = await fresh.get('petstore');
 		assert.ok(persisted, 'registration should survive a fresh registry bound to the same memento');
-		const freshEntry = fresh.getEntry('petstore');
+		const freshEntry = await fresh.getEntry('petstore');
 		assert.ok(freshEntry);
 		assert.strictEqual(freshEntry.index.size, 4);
 		for (const [operationId] of freshEntry.index) {
@@ -170,17 +170,18 @@ suite('Registration flows', () => {
 		}
 	});
 
-	test('upsert with an existing apiId returns a conflict without mutating state', () => {
+	test('upsert with an existing apiId returns a conflict without mutating state', async () => {
 		const memento = new FakeMemento();
 		const registry = new MementoApiRegistry(memento);
 		const text = readFixture('petstore30.json');
 		const first = createRegistration(text, 'dupe', 'https://a.example.com', { kind: 'file', fsPath: 'a.json' });
 		const second = createRegistration(text, 'dupe', 'https://b.example.com', { kind: 'file', fsPath: 'b.json' });
 
-		assert.strictEqual(registry.upsert(first).status, 'created');
-		const conflict = registry.upsert(second);
+		assert.strictEqual((await registry.upsert(first)).status, 'created');
+		const conflict = await registry.upsert(second);
 		assert.strictEqual(conflict.status, 'conflict');
-		assert.deepStrictEqual([registry.list().length, registry.get('dupe')?.baseUrl], [1, 'https://a.example.com']);
+		const dupe = await registry.get('dupe');
+		assert.deepStrictEqual([registry.list().length, dupe?.baseUrl], [1, 'https://a.example.com']);
 	});
 
 	test('Swagger 2.0 documents are rejected with an actionable message', () => {
@@ -231,14 +232,14 @@ suite('Registration flows', () => {
 			kind: 'file',
 			fsPath: path.join(FIXTURES, 'does-not-exist.json'),
 		});
-		registry.upsert(okReg);
-		registry.upsert(deadReg);
+		await registry.upsert(okReg);
+		await registry.upsert(deadReg);
 
 		const failures = await refreshAll(ctx);
 
 		assert.deepStrictEqual(failures.map((f) => f.split(':')[0]), ['dead-api']);
-		assert.strictEqual(registry.get('dead-api')?.snapshot.document.info.version, '1.0.0');
-		assert.strictEqual(registry.get('ok-api')?.snapshot.document.info.version, '9.9.9');
+		assert.strictEqual((await registry.get('dead-api'))?.snapshot.model.info.version, '1.0.0');
+		assert.strictEqual((await registry.get('ok-api'))?.snapshot.model.info.version, '9.9.9');
 	});
 
 	test('SecretTokenStore round-trips under the apiId key scheme only', async () => {

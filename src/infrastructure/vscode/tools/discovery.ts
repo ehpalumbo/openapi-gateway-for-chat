@@ -29,8 +29,8 @@ export function createListApisTool(context: ToolContext): vscode.LanguageModelTo
 
 export function createDescribeApiTool(context: ToolContext): vscode.LanguageModelTool<DescribeApiInput> {
 	return {
-		invoke: (options) => {
-			const result = context.discoveryUseCases.describeApi(options.input.apiId);
+		invoke: async (options) => {
+			const result = await context.discoveryUseCases.describeApi(options.input.apiId);
 			return renderDiscoveryResult(result);
 		},
 	};
@@ -38,9 +38,9 @@ export function createDescribeApiTool(context: ToolContext): vscode.LanguageMode
 
 export function createListOperationsTool(context: ToolContext): vscode.LanguageModelTool<ListOperationsInput> {
 	return {
-		invoke: (options) => {
+		invoke: async (options) => {
 			const { apiId, groups } = options.input;
-			const result = context.discoveryUseCases.listOperations(apiId, groups);
+			const result = await context.discoveryUseCases.listOperations(apiId, groups);
 			return renderDiscoveryResult(result);
 		},
 	};
@@ -50,9 +50,9 @@ export function createDescribeOperationTool(
 	context: ToolContext
 ): vscode.LanguageModelTool<DescribeOperationInput> {
 	return {
-		invoke: (options) => {
+		invoke: async (options) => {
 			const { apiId, operationId } = options.input;
-			const result = context.discoveryUseCases.describeOperation(apiId, operationId);
+			const result = await context.discoveryUseCases.describeOperation(apiId, operationId);
 			return renderDiscoveryResult(result);
 		},
 	};
