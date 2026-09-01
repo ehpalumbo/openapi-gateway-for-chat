@@ -235,7 +235,7 @@ suite('Invocation flow', () => {
 		};
 		registryStorageDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openapi-gateway-registry-'));
 		registry = new FileBackedApiRegistry(new FakeMemento(), vscode.Uri.file(registryStorageDir));
-		await registry.upsert(registration);
+		await registry.insert(registration);
 
 		// A real store over an isolated tmpdir exercises the production
 		// `workspace.fs` code paths while keeping workspace storage untouched.

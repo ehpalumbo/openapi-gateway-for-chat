@@ -137,8 +137,8 @@ suite('Discovery flow', () => {
 	});
 
 	test('the progressive disclosure chain works end-to-end on the fixture', async () => {
-		await registry.upsert(catalogRegistration('catalog'));
-		await registry.upsert(catalogRegistration('mirror'));
+		await registry.insert(catalogRegistration('catalog'));
+		await registry.insert(catalogRegistration('mirror'));
 
 		const listed = (await invoke(listApisTool, {})) as { apis: { apiId: string; title: string }[] };
 		assert.deepStrictEqual(

@@ -24,6 +24,9 @@ import {
 let spillStore: SpillStore | undefined;
 
 export function activate({ globalState, secrets, storageUri, globalStorageUri, subscriptions }: vscode.ExtensionContext) {
+	if (!globalStorageUri) {
+		throw new Error('OpenAPI Gateway requires global storage to be available (globalStorageUri is undefined).');
+	}
 	// 1. Infrastructure Adapters
 	const registry = new FileBackedApiRegistry(globalState, globalStorageUri);
 	const tokens = new SecretTokenStore(secrets);
