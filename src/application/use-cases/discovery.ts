@@ -20,18 +20,18 @@ export class DiscoveryUseCases {
 	constructor(private readonly registry: ApiRegistry) { }
 
 	listApis(): DiscoveryResult<{ apis: ApiSummary[] }> {
-		const registrations = this.registry.list();
-		if (registrations.length === 0) {
+		const index = this.registry.list();
+		if (index.length === 0) {
 			return { kind: 'no_apis' };
 		}
 		return {
 			kind: 'success',
-			data: { apis: buildListApis(registrations) },
+			data: { apis: buildListApis(index) },
 		};
 	}
 
-	describeApi(apiId: string): DiscoveryResult<DescribeApiResult> {
-		const entry = this.resolveEntry(apiId);
+	async describeApi(apiId: string): Promise<DiscoveryResult<DescribeApiResult>> {
+		const entry = await this.resolveEntry(apiId);
 		if ('kind' in entry) {
 			return entry;
 		}
@@ -41,8 +41,8 @@ export class DiscoveryUseCases {
 		};
 	}
 
-	listOperations(apiId: string, groups: string[]): DiscoveryResult<ListOperationsResult> {
-		const entry = this.resolveEntry(apiId);
+	async listOperations(apiId: string, groups: string[]): Promise<DiscoveryResult<ListOperationsResult>> {
+		const entry = await this.resolveEntry(apiId);
 		if ('kind' in entry) {
 			return entry;
 		}
@@ -52,8 +52,8 @@ export class DiscoveryUseCases {
 		};
 	}
 
-	describeOperation(apiId: string, operationId: string): DiscoveryResult<DescribeOperationResult> {
-		const entry = this.resolveEntry(apiId);
+	async describeOperation(apiId: string, operationId: string): Promise<DiscoveryResult<DescribeOperationResult>> {
+		const entry = await this.resolveEntry(apiId);
 		if ('kind' in entry) {
 			return entry;
 		}
@@ -71,11 +71,11 @@ export class DiscoveryUseCases {
 		};
 	}
 
-	private resolveEntry(apiId: string): RegistryEntry | DiscoveryResult<never> {
+	private async resolveEntry(apiId: string): Promise<RegistryEntry | DiscoveryResult<never>> {
 		if (this.registry.list().length === 0) {
 			return { kind: 'no_apis' };
 		}
-		const entry = this.registry.getEntry(apiId);
+		const entry = await this.registry.getEntry(apiId);
 		if (!entry) {
 			return {
 				kind: 'unknown_api',

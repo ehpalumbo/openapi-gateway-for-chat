@@ -9,7 +9,7 @@ import { ApiRegistration, buildApiModel, parseSpec } from '../domain';
 import {
 	createInvokeOperationTool,
 	FetchHttpClient,
-	MementoApiRegistry,
+	FileBackedApiRegistry,
 	registerGatewayTools,
 	ToolContext,
 	WorkspaceSpillStore,
@@ -151,7 +151,8 @@ async function invokeExpectSinglePart(name: string, input: Record<string, unknow
  * every HTTP response is served as uniform metadata + body data parts.
  */
 suite('Invocation flow', () => {
-	let registry: MementoApiRegistry;
+	let registry: FileBackedApiRegistry;
+	let registryStorageDir: string;
 	let tokens: TokenStore;
 	let spills: WorkspaceSpillStore;
 	let toolContext: ToolContext;
@@ -217,13 +218,14 @@ suite('Invocation flow', () => {
 		baseUrl = `http://127.0.0.1:${address.port}`;
 
 		const document = parseSpec(readFixture('echo30.json'));
+		const model = buildApiModel(document);
 		const registration: ApiRegistration = {
 			apiId: 'echo',
 			title: document.info.title,
 			version: document.info.version,
 			baseUrl,
 			source: { kind: 'file', fsPath: path.join(FIXTURES, 'echo30.json') },
-			snapshot: { document, model: buildApiModel(document) },
+			snapshot: { model },
 		};
 		const stored = new Map<string, string>();
 		tokens = {
@@ -231,8 +233,9 @@ suite('Invocation flow', () => {
 			deleteToken: async (apiId) => void stored.delete(apiId),
 			getToken: async (apiId) => stored.get(apiId),
 		};
-		registry = new MementoApiRegistry(new FakeMemento());
-		registry.upsert(registration);
+		registryStorageDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openapi-gateway-registry-'));
+		registry = new FileBackedApiRegistry(new FakeMemento(), vscode.Uri.file(registryStorageDir));
+		await registry.upsert(registration);
 
 		// A real store over an isolated tmpdir exercises the production
 		// `workspace.fs` code paths while keeping workspace storage untouched.
@@ -249,6 +252,14 @@ suite('Invocation flow', () => {
 	suiteTeardown(async () => {
 		await spills.cleanup();
 		await new Promise<void>((resolve) => server.close(() => resolve()));
+		if (registryStorageDir) {
+			await fs.promises.rm(registryStorageDir, { recursive: true, force: true });
+		}
+		if (spillDir) {
+			// storageRoot cleanup already via spills, but ensure registry spills dir removed
+			const storageRoot = path.dirname(spillDir);
+			await fs.promises.rm(storageRoot, { recursive: true, force: true }).catch(() => undefined);
+		}
 	});
 
 	test('successful GET round-trip sends exactly the built request', async () => {

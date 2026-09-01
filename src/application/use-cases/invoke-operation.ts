@@ -77,7 +77,7 @@ export class InvokeOperationUseCase {
 	 * Prepares an invocation, checking if user confirmation is required (R-SAFE-1..3).
 	 */
 	async prepareInvocation(input: InvokeOperationInput): Promise<PrepareInvocationResult> {
-		const entry = this.registry.getEntry(input.apiId);
+		const entry = await this.registry.getEntry(input.apiId);
 		const operation = entry?.index.get(input.operationId);
 		if (!entry || !operation) {
 			return { kind: 'not_found' };

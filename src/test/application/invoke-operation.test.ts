@@ -18,7 +18,6 @@ function registration(baseUrl = 'https://api.example.com/v1'): ApiRegistration {
 		baseUrl,
 		source: { kind: 'url', url: 'https://spec.example.com/petshop.json' },
 		snapshot: {
-			document: { openapi: '3.0.3', info: { title: 'Petshop', version: '1.0.0' }, paths: {} },
 			model: { info: { title: 'Petshop', version: '1.0.0' }, schemas: {}, groups: [] },
 		},
 	};
@@ -62,15 +61,14 @@ class FakeRegistry implements ApiRegistry {
 	constructor(regs: ApiRegistration[] = []) {
 		this.regList = [...regs];
 	}
-	load(): void { }
-	upsert() { return { status: 'created' as const }; }
-	replaceSnapshot() { return true; }
-	remove() { return true; }
-	list() { return this.regList; }
-	get(apiId: string) { return this.regList.find((r) => r.apiId === apiId); }
+	async upsert() { return { status: 'created' as const }; }
+	async replaceSnapshot() { return true; }
+	async remove() { return true; }
+	list() { return this.regList.map((r) => ({ apiId: r.apiId, title: r.title, version: r.version, baseUrl: r.baseUrl, source: r.source, description: r.snapshot.model.info.description })); }
 	has(apiId: string) { return this.regList.some((r) => r.apiId === apiId); }
-	getEntry(apiId: string) {
-		const reg = this.get(apiId);
+	async get(apiId: string) { return this.regList.find((r) => r.apiId === apiId); }
+	async getEntry(apiId: string) {
+		const reg = await this.get(apiId);
 		return reg ? { registration: reg, model: reg.snapshot.model, index: new Map([[operation().operationId, operation()]]) } : undefined;
 	}
 }

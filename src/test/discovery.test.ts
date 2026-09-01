@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DiscoveryUseCases, InvokeOperationUseCase, TokenStore } from '../application';
@@ -10,7 +11,7 @@ import {
 	createListApisTool,
 	createListOperationsTool,
 	FetchHttpClient,
-	MementoApiRegistry,
+	FileBackedApiRegistry,
 	registerGatewayTools,
 	ToolContext,
 } from '../infrastructure';
@@ -63,13 +64,14 @@ const noSpills = {
 
 function catalogRegistration(apiId: string): ApiRegistration {
 	const document = parseSpec(readFixture('catalog30.json'));
+	const model = buildApiModel(document);
 	return {
 		apiId,
 		title: document.info.title,
 		version: document.info.version,
 		baseUrl: 'https://catalog.example.com/v2',
 		source: { kind: 'file', fsPath: path.join(FIXTURES, 'catalog30.json') },
-		snapshot: { document, model: buildApiModel(document) },
+		snapshot: { model },
 	};
 }
 
@@ -90,15 +92,17 @@ async function invoke(tool: vscode.LanguageModelTool<unknown>, input: Record<str
  * response must come purely from the registry snapshot (NFR-4).
  */
 suite('Discovery flow', () => {
-	let registry: MementoApiRegistry;
+	let registry: FileBackedApiRegistry;
+	let registryStorageDir: string;
 	let context: ToolContext;
 	let listApisTool: vscode.LanguageModelTool<unknown>;
 	let describeApiTool: vscode.LanguageModelTool<unknown>;
 	let listOperationsTool: vscode.LanguageModelTool<unknown>;
 	let describeOperationTool: vscode.LanguageModelTool<unknown>;
 
-	suiteSetup(() => {
-		registry = new MementoApiRegistry(new FakeMemento());
+	suiteSetup(async () => {
+		registryStorageDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openapi-gateway-registry-'));
+		registry = new FileBackedApiRegistry(new FakeMemento(), vscode.Uri.file(registryStorageDir));
 		const discoveryUseCases = new DiscoveryUseCases(registry);
 		const invokeUseCase = new InvokeOperationUseCase(registry, noTokens, new FetchHttpClient());
 		context = { registry, tokens: noTokens, spills: noSpills, discoveryUseCases, invokeUseCase };
@@ -106,6 +110,12 @@ suite('Discovery flow', () => {
 		describeApiTool = createDescribeApiTool(context);
 		listOperationsTool = createListOperationsTool(context);
 		describeOperationTool = createDescribeOperationTool(context);
+	});
+
+	suiteTeardown(async () => {
+		if (registryStorageDir) {
+			await fs.promises.rm(registryStorageDir, { recursive: true, force: true });
+		}
 	});
 
 	test('registerGatewayTools binds every contributed name in vscode.lm.tools', () => {
@@ -127,8 +137,8 @@ suite('Discovery flow', () => {
 	});
 
 	test('the progressive disclosure chain works end-to-end on the fixture', async () => {
-		registry.upsert(catalogRegistration('catalog'));
-		registry.upsert(catalogRegistration('mirror'));
+		await registry.upsert(catalogRegistration('catalog'));
+		await registry.upsert(catalogRegistration('mirror'));
 
 		const listed = (await invoke(listApisTool, {})) as { apis: { apiId: string; title: string }[] };
 		assert.deepStrictEqual(
@@ -199,8 +209,8 @@ suite('Discovery flow', () => {
 	});
 
 	test('after unregistering, tools report the empty-registry error instead of throwing', async () => {
-		registry.remove('catalog');
-		registry.remove('mirror');
+		await registry.remove('catalog');
+		await registry.remove('mirror');
 
 		const listed = (await invoke(listApisTool, {})) as { error?: string };
 		assert.match(listed.error ?? '', /No APIs registered/);

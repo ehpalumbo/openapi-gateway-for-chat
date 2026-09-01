@@ -1,4 +1,4 @@
-import { ApiModel, ApiRegistration, OperationInfo } from '../../domain';
+import { ApiIndexEntry, ApiModel, ApiRegistration, OperationInfo } from '../../domain';
 
 /**
  * Result of {@link ApiRegistry.upsert}.
@@ -22,14 +22,24 @@ export interface RegistryEntry {
 
 /**
  * Durable storage of API registrations and last-good snapshots (R-REG-5..7).
+ *
+ * The registry maintains a synchronous lightweight index (`list`/`has`) and
+ * lazy-loads full registrations on demand — `get`/`getEntry` are
+ * `Promise`-based and cache the derived {@link RegistryEntry} (model + index)
+ * after the first load for an `apiId`.
  */
 export interface ApiRegistry {
-	load(): void;
-	upsert(registration: ApiRegistration): UpsertResult;
-	replaceSnapshot(apiId: string, snapshot: ApiRegistration['snapshot']): boolean;
-	remove(apiId: string): boolean;
-	list(): ApiRegistration[];
-	get(apiId: string): ApiRegistration | undefined;
+	/** @returns Lightweight index of all registrations in insertion order. */
+	list(): readonly ApiIndexEntry[];
+	/** @param apiId - Registration ID to check. */
 	has(apiId: string): boolean;
-	getEntry(apiId: string): RegistryEntry | undefined;
+
+	/** @param apiId - Registration ID to look up. */
+	get(apiId: string): Promise<ApiRegistration | undefined>;
+	/** @param apiId - Registration whose runtime view is requested. */
+	getEntry(apiId: string): Promise<RegistryEntry | undefined>;
+
+	upsert(registration: ApiRegistration): Promise<UpsertResult>;
+	replaceSnapshot(apiId: string, snapshot: ApiRegistration['snapshot']): Promise<boolean>;
+	remove(apiId: string): Promise<boolean>;
 }

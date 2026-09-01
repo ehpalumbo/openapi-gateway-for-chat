@@ -64,7 +64,7 @@ async function invokeOperation(
 	context: ToolContext,
 	input: InvokeOperationInput
 ): Promise<vscode.LanguageModelToolResult> {
-	const entry = context.registry.getEntry(input.apiId);
+	const entry = await context.registry.getEntry(input.apiId);
 	if (!entry) {
 		const available = context.registry.list().map((r) => r.apiId).join(', ');
 		return errorResult(`Unknown apiId "${input.apiId}". Registered APIs: ${available || '(none)'}.`);

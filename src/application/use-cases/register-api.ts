@@ -1,4 +1,5 @@
 import {
+	ApiIndexEntry,
 	ApiRegistration,
 	ApiSnapshot,
 	buildApiModel,
@@ -9,15 +10,16 @@ import {
 import { ApiRegistry, TokenStore, UpsertResult } from '../ports';
 
 /**
- * Parses spec text into a last-good snapshot: validated document plus its
- * grouped operation model (R-REG-7).
+ * Parses spec text into a last-good snapshot: the grouped operation model
+ * (R-REG-7). The raw document is discarded — refresh rebuilds from
+ * {@link SpecSource} (R-REG-6).
  *
  * @param jsonText - Raw OpenAPI JSON text.
  * @returns The snapshot ready to store in a registration.
  */
 export function buildSnapshot(jsonText: string): ApiSnapshot {
 	const document = parseSpec(jsonText);
-	return { document, model: buildApiModel(document) };
+	return { model: buildApiModel(document) };
 }
 
 /**
@@ -30,7 +32,7 @@ export function createRegistration(
 	source: SpecSource
 ): ApiRegistration {
 	const snapshot = buildSnapshot(jsonText);
-	const { title, version } = snapshot.document.info;
+	const { title, version } = snapshot.model.info;
 	return {
 		apiId,
 		title,
@@ -38,6 +40,20 @@ export function createRegistration(
 		baseUrl,
 		source,
 		snapshot,
+	};
+}
+
+/**
+ * Builds the lightweight memento index entry for a registration.
+ */
+export function toIndexEntry(registration: ApiRegistration): ApiIndexEntry {
+	return {
+		apiId: registration.apiId,
+		title: registration.title,
+		version: registration.version,
+		baseUrl: registration.baseUrl,
+		source: registration.source,
+		description: registration.snapshot.model.info.description,
 	};
 }
 
@@ -81,7 +97,7 @@ export class RegisterApiUseCase {
 	 */
 	async execute(params: RegisterApiParams): Promise<UpsertResult & { registration?: ApiRegistration }> {
 		const registration = createRegistration(params.jsonText, params.apiId, params.baseUrl, params.source);
-		const result = this.registry.upsert(registration);
+		const result = await this.registry.upsert(registration);
 		if (result.status === 'conflict') {
 			return result;
 		}

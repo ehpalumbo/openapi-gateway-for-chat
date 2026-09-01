@@ -11,7 +11,7 @@ import {
 	CommandContext,
 	FetchHttpClient,
 	FetchSpecLoader,
-	MementoApiRegistry,
+	FileBackedApiRegistry,
 	refreshAll,
 	registerApiCommands,
 	registerGatewayTools,
@@ -25,7 +25,7 @@ let spillStore: SpillStore | undefined;
 
 export function activate({ globalState, secrets, storageUri, globalStorageUri, subscriptions }: vscode.ExtensionContext) {
 	// 1. Infrastructure Adapters
-	const registry = new MementoApiRegistry(globalState);
+	const registry = new FileBackedApiRegistry(globalState, globalStorageUri);
 	const tokens = new SecretTokenStore(secrets);
 	spillStore = new WorkspaceSpillStore(storageUri ?? globalStorageUri);
 	const httpClient = new FetchHttpClient();

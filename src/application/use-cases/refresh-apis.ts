@@ -17,12 +17,12 @@ export class RefreshApisUseCase {
 	 */
 	async execute(): Promise<string[]> {
 		const failures: string[] = [];
-		for (const registration of this.registry.list()) {
+		for (const entry of this.registry.list()) {
 			try {
-				const text = await this.specLoader.load(registration.source);
-				this.registry.replaceSnapshot(registration.apiId, buildSnapshot(text));
+				const text = await this.specLoader.load(entry.source);
+				await this.registry.replaceSnapshot(entry.apiId, buildSnapshot(text));
 			} catch (err) {
-				failures.push(`${registration.apiId}: ${err instanceof Error ? err.message : String(err)}`);
+				failures.push(`${entry.apiId}: ${err instanceof Error ? err.message : String(err)}`);
 			}
 		}
 		return failures;

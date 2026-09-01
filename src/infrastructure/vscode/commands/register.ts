@@ -17,7 +17,7 @@ async function promptForUniqueId(ctx: CommandContext, suggested: string): Promis
 			return undefined;
 		}
 		const apiId = entered.trim();
-		const existing = ctx.registry.get(apiId);
+		const existing = ctx.registry.list().find((entry) => entry.apiId === apiId);
 		if (!existing) {
 			return apiId;
 		}

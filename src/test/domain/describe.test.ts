@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import {
+	ApiIndexEntry,
 	ApiRegistration,
 	buildApiModel,
 	buildDescribeApi,
@@ -68,7 +69,7 @@ function registration(): ApiRegistration {
 		version: document.info.version,
 		baseUrl: 'https://things.example.com',
 		source: { kind: 'file', fsPath: 'things.json' } as SpecSource,
-		snapshot: { document, model: buildApiModel(document) },
+		snapshot: { model: buildApiModel(document) },
 	};
 }
 
@@ -76,9 +77,17 @@ suite('Description builders', () => {
 	const api = registration();
 	// The registry derives this once per mutation; builders must never rebuild it.
 	const index = buildOperationIndex(api.snapshot.model);
+	const apiIndexEntry: ApiIndexEntry = {
+		apiId: api.apiId,
+		title: api.title,
+		version: api.version,
+		baseUrl: api.baseUrl,
+		source: api.source,
+		description: api.snapshot.model.info.description,
+	};
 
 	test('buildListApis summarizes each registration', () => {
-		assert.deepStrictEqual(buildListApis([api]), [
+		assert.deepStrictEqual(buildListApis([apiIndexEntry]), [
 			{ apiId: 'things', title: 'Things', version: '3.2.1', description: 'Thing API.' },
 		]);
 	});
@@ -152,7 +161,7 @@ suite('Description builders', () => {
 
 	test('all builder outputs survive a JSON round-trip', () => {
 		for (const value of [
-			buildListApis([api]),
+			buildListApis([apiIndexEntry]),
 			buildDescribeApi(api),
 			buildListOperations(api, ['things']),
 			buildDescribeOperation(api, index.get('things-get-things')!),

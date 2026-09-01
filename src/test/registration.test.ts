@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as http from 'http';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
@@ -16,7 +17,7 @@ import {
 	CommandContext,
 	FetchSpecLoader,
 	fetchWithLimit,
-	MementoApiRegistry,
+	FileBackedApiRegistry,
 	ProtocolNotAllowedError,
 	refreshAll,
 	SecretTokenStore,
@@ -79,6 +80,18 @@ class FakeSecretStorage implements vscode.SecretStorage {
 interface TestServer {
 	url(pathname: string): string;
 	dispose(): Promise<void>;
+}
+
+async function createTempRegistry(memento = new FakeMemento()): Promise<{
+	registry: FileBackedApiRegistry;
+	memento: FakeMemento;
+	dir: string;
+	uri: vscode.Uri;
+}> {
+	const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openapi-gateway-registry-'));
+	const uri = vscode.Uri.file(dir);
+	const registry = new FileBackedApiRegistry(memento, uri);
+	return { registry, memento, dir, uri };
 }
 
 async function startSpecServer(): Promise<TestServer> {
@@ -146,41 +159,48 @@ suite('Registration flows', () => {
 	});
 
 	test('URL registration end-to-end persists and is visible to a fresh registry over the same state', async () => {
-		const memento = new FakeMemento();
-		const registry = new MementoApiRegistry(memento);
-		const specLoader = new FetchSpecLoader();
-		const text = await specLoader.load({ kind: 'url', url: specServer.url('/petstore30.json') });
-		const source: SpecSource = { kind: 'url', url: specServer.url('/petstore30.json') };
-		const registration = createRegistration(text, 'petstore', 'https://petstore.example.com/v1', source);
+		const { registry, memento, dir, uri } = await createTempRegistry();
+		try {
+			const specLoader = new FetchSpecLoader();
+			const text = await specLoader.load({ kind: 'url', url: specServer.url('/petstore30.json') });
+			const source: SpecSource = { kind: 'url', url: specServer.url('/petstore30.json') };
+			const registration = createRegistration(text, 'petstore', 'https://petstore.example.com/v1', source);
 
-		assert.strictEqual(registration.title, 'Petstore');
-		assert.strictEqual(registration.version, '1.0.0');
-		const upsert = registry.upsert(registration);
-		assert.strictEqual(upsert.status, 'created');
-		assert.strictEqual(registry.getEntry('petstore')?.index.size, 4);
+			assert.strictEqual(registration.title, 'Petstore');
+			assert.strictEqual(registration.version, '1.0.0');
+			const upsert = await registry.upsert(registration);
+			assert.strictEqual(upsert.status, 'created');
+			assert.strictEqual((await registry.getEntry('petstore'))?.index.size, 4);
 
-		const fresh = new MementoApiRegistry(memento);
-		const persisted = fresh.get('petstore');
-		assert.ok(persisted, 'registration should survive a fresh registry bound to the same memento');
-		const freshEntry = fresh.getEntry('petstore');
-		assert.ok(freshEntry);
-		assert.strictEqual(freshEntry.index.size, 4);
-		for (const [operationId] of freshEntry.index) {
-			assert.ok(freshEntry.model.groups.some((group) => group.operations.some((op) => op.operationId === operationId)));
+			const fresh = new FileBackedApiRegistry(memento, uri);
+			const persisted = await fresh.get('petstore');
+			assert.ok(persisted, 'registration should survive a fresh registry bound to the same memento');
+			const freshEntry = await fresh.getEntry('petstore');
+			assert.ok(freshEntry);
+			assert.strictEqual(freshEntry.index.size, 4);
+			for (const [operationId] of freshEntry.index) {
+				assert.ok(freshEntry.model.groups.some((group) => group.operations.some((op) => op.operationId === operationId)));
+			}
+		} finally {
+			await fs.promises.rm(dir, { recursive: true, force: true });
 		}
 	});
 
-	test('upsert with an existing apiId returns a conflict without mutating state', () => {
-		const memento = new FakeMemento();
-		const registry = new MementoApiRegistry(memento);
-		const text = readFixture('petstore30.json');
-		const first = createRegistration(text, 'dupe', 'https://a.example.com', { kind: 'file', fsPath: 'a.json' });
-		const second = createRegistration(text, 'dupe', 'https://b.example.com', { kind: 'file', fsPath: 'b.json' });
+	test('upsert with an existing apiId returns a conflict without mutating state', async () => {
+		const { registry, dir } = await createTempRegistry();
+		try {
+			const text = readFixture('petstore30.json');
+			const first = createRegistration(text, 'dupe', 'https://a.example.com', { kind: 'file', fsPath: 'a.json' });
+			const second = createRegistration(text, 'dupe', 'https://b.example.com', { kind: 'file', fsPath: 'b.json' });
 
-		assert.strictEqual(registry.upsert(first).status, 'created');
-		const conflict = registry.upsert(second);
-		assert.strictEqual(conflict.status, 'conflict');
-		assert.deepStrictEqual([registry.list().length, registry.get('dupe')?.baseUrl], [1, 'https://a.example.com']);
+			assert.strictEqual((await registry.upsert(first)).status, 'created');
+			const conflict = await registry.upsert(second);
+			assert.strictEqual(conflict.status, 'conflict');
+			const dupe = await registry.get('dupe');
+			assert.deepStrictEqual([registry.list().length, dupe?.baseUrl], [1, 'https://a.example.com']);
+		} finally {
+			await fs.promises.rm(dir, { recursive: true, force: true });
+		}
 	});
 
 	test('Swagger 2.0 documents are rejected with an actionable message', () => {
@@ -200,8 +220,9 @@ suite('Registration flows', () => {
 	});
 
 	test('refresh failure retention with mixed sources', async () => {
-		const registry = new MementoApiRegistry(new FakeMemento());
-		const tokens = new SecretTokenStore(new FakeSecretStorage());
+		const { registry, dir } = await createTempRegistry();
+		try {
+			const tokens = new SecretTokenStore(new FakeSecretStorage());
 		const updatedText = readFixture('petstore30.json').replace('"version": "1.0.0"', '"version": "9.9.9"');
 		const specLoader = {
 			load: async (source: SpecSource) => {
@@ -231,14 +252,17 @@ suite('Registration flows', () => {
 			kind: 'file',
 			fsPath: path.join(FIXTURES, 'does-not-exist.json'),
 		});
-		registry.upsert(okReg);
-		registry.upsert(deadReg);
+		await registry.upsert(okReg);
+		await registry.upsert(deadReg);
 
 		const failures = await refreshAll(ctx);
 
 		assert.deepStrictEqual(failures.map((f) => f.split(':')[0]), ['dead-api']);
-		assert.strictEqual(registry.get('dead-api')?.snapshot.document.info.version, '1.0.0');
-		assert.strictEqual(registry.get('ok-api')?.snapshot.document.info.version, '9.9.9');
+			assert.strictEqual((await registry.get('dead-api'))?.snapshot.model.info.version, '1.0.0');
+			assert.strictEqual((await registry.get('ok-api'))?.snapshot.model.info.version, '9.9.9');
+		} finally {
+			await fs.promises.rm(dir, { recursive: true, force: true });
+		}
 	});
 
 	test('SecretTokenStore round-trips under the apiId key scheme only', async () => {

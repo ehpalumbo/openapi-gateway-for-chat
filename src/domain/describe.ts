@@ -8,6 +8,7 @@
 import { operationsInGroups } from './operations';
 import { collectSchemaRefs, ResolvedSchema, resolveSchemaClosures } from './schema-resolver';
 import {
+	ApiIndexEntry,
 	ApiRegistration,
 	HttpMethod,
 	JsonSchema,
@@ -50,17 +51,12 @@ function jsonNormalized<T>(value: T): T {
 }
 
 /**
- * @param registrations - All registrations in the registry.
- * @returns One summary per registration (R-DISC-1).
+ * @param indexEntries - Lightweight index entries.
+ * @returns One summary per index entry (R-DISC-1).
  */
-export function buildListApis(registrations: ApiRegistration[]): ApiSummary[] {
-	return registrations.map(({ apiId, title, version, snapshot }) =>
-		jsonNormalized({
-			apiId,
-			title,
-			version,
-			description: snapshot.model.info.description,
-		})
+export function buildListApis(indexEntries: readonly ApiIndexEntry[]): ApiSummary[] {
+	return indexEntries.map(({ apiId, title, version, description }) =>
+		jsonNormalized({ apiId, title, version, description })
 	);
 }
 
