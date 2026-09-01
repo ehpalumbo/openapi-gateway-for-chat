@@ -1,12 +1,15 @@
 import { ApiIndexEntry, ApiModel, ApiRegistration, OperationInfo } from '../../domain';
 
 /**
- * Result of {@link ApiRegistry.upsert}.
+ * Result of {@link ApiRegistry.insert}.
  * - `created`: the registration was stored.
  * - `conflict`: an API with the same `apiId` already exists; nothing changed
  *   and the caller resolves the conflict by prompting (R-REG-8).
  */
-export type UpsertResult = { status: 'created' } | { status: 'conflict'; existingTitle: string };
+export type InsertResult = { status: 'created' } | { status: 'conflict'; existingTitle: string };
+
+/** @deprecated Use {@link InsertResult} — `upsert` was a misnomer (insert-only, no update). */
+export type UpsertResult = InsertResult;
 
 /**
  * Runtime view of one registered API with its operation index.
@@ -39,7 +42,10 @@ export interface ApiRegistry {
 	/** @param apiId - Registration whose runtime view is requested. */
 	getEntry(apiId: string): Promise<RegistryEntry | undefined>;
 
-	upsert(registration: ApiRegistration): Promise<UpsertResult>;
+	insert(registration: ApiRegistration): Promise<InsertResult>;
+
+	/** @deprecated Use {@link insert} — misnamed, does not update existing entries. */
+	upsert(registration: ApiRegistration): Promise<InsertResult>;
 	replaceSnapshot(apiId: string, snapshot: ApiRegistration['snapshot']): Promise<boolean>;
 	remove(apiId: string): Promise<boolean>;
 }

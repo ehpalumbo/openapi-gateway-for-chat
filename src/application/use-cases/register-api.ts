@@ -2,12 +2,14 @@ import {
 	ApiIndexEntry,
 	ApiRegistration,
 	ApiSnapshot,
+	API_ID_VALIDATION_MESSAGE,
 	buildApiModel,
+	isValidApiId,
 	OpenApiDocument,
 	parseSpec,
 	SpecSource,
 } from '../../domain';
-import { ApiRegistry, TokenStore, UpsertResult } from '../ports';
+import { ApiRegistry, InsertResult, TokenStore } from '../ports';
 
 /**
  * Parses spec text into a last-good snapshot: the grouped operation model
@@ -95,9 +97,12 @@ export class RegisterApiUseCase {
 	/**
 	 * Registers an API from spec text, validated against the registry and persists credentials.
 	 */
-	async execute(params: RegisterApiParams): Promise<UpsertResult & { registration?: ApiRegistration }> {
+	async execute(params: RegisterApiParams): Promise<InsertResult & { registration?: ApiRegistration }> {
+		if (!isValidApiId(params.apiId)) {
+			throw new Error(`Invalid apiId "${params.apiId}": ${API_ID_VALIDATION_MESSAGE}`);
+		}
 		const registration = createRegistration(params.jsonText, params.apiId, params.baseUrl, params.source);
-		const result = await this.registry.upsert(registration);
+		const result = await this.registry.insert(registration);
 		if (result.status === 'conflict') {
 			return result;
 		}

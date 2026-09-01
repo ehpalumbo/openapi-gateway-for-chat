@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { resolveBaseUrlSuggestion, slugifyTitle } from '../../../application';
-import { parseSpec, SpecSource } from '../../../domain';
+import { API_ID_VALIDATION_MESSAGE, isValidApiId, parseSpec, SpecSource } from '../../../domain';
 import { fetchWithLimit, SPEC_FETCH_LIMIT_BYTES } from '../http';
 import { CommandContext } from './common';
 
@@ -10,13 +10,26 @@ async function promptForUniqueId(ctx: CommandContext, suggested: string): Promis
 		const entered = await vscode.window.showInputBox({
 			prompt: 'Unique API identifier (used by tools to reference this API)',
 			value: candidate,
-			validateInput: (value) =>
-				value.trim().length === 0 ? 'Enter a non-empty identifier.' : undefined,
+			validateInput: (value) => {
+				const trimmed = value.trim();
+				if (trimmed.length === 0) {
+					return 'Enter a non-empty identifier.';
+				}
+				if (!isValidApiId(trimmed)) {
+					return API_ID_VALIDATION_MESSAGE;
+				}
+				return undefined;
+			},
 		});
 		if (entered === undefined) {
 			return undefined;
 		}
 		const apiId = entered.trim();
+		if (!isValidApiId(apiId)) {
+			void vscode.window.showErrorMessage(API_ID_VALIDATION_MESSAGE);
+			candidate = apiId;
+			continue;
+		}
 		const existing = ctx.registry.list().find((entry) => entry.apiId === apiId);
 		if (!existing) {
 			return apiId;

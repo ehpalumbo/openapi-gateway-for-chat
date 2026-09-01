@@ -61,7 +61,8 @@ class FakeRegistry implements ApiRegistry {
 	constructor(regs: ApiRegistration[] = []) {
 		this.regList = [...regs];
 	}
-	async upsert() { return { status: 'created' as const }; }
+	async insert() { return { status: 'created' as const }; }
+	async upsert() { return this.insert(); }
 	async replaceSnapshot() { return true; }
 	async remove() { return true; }
 	list() { return this.regList.map((r) => ({ apiId: r.apiId, title: r.title, version: r.version, baseUrl: r.baseUrl, source: r.source, description: r.snapshot.model.info.description })); }

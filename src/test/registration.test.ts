@@ -168,8 +168,8 @@ suite('Registration flows', () => {
 
 			assert.strictEqual(registration.title, 'Petstore');
 			assert.strictEqual(registration.version, '1.0.0');
-			const upsert = await registry.upsert(registration);
-			assert.strictEqual(upsert.status, 'created');
+			const inserted = await registry.insert(registration);
+			assert.strictEqual(inserted.status, 'created');
 			assert.strictEqual((await registry.getEntry('petstore'))?.index.size, 4);
 
 			const fresh = new FileBackedApiRegistry(memento, uri);
@@ -186,15 +186,15 @@ suite('Registration flows', () => {
 		}
 	});
 
-	test('upsert with an existing apiId returns a conflict without mutating state', async () => {
+	test('insert with an existing apiId returns a conflict without mutating state', async () => {
 		const { registry, dir } = await createTempRegistry();
 		try {
 			const text = readFixture('petstore30.json');
 			const first = createRegistration(text, 'dupe', 'https://a.example.com', { kind: 'file', fsPath: 'a.json' });
 			const second = createRegistration(text, 'dupe', 'https://b.example.com', { kind: 'file', fsPath: 'b.json' });
 
-			assert.strictEqual((await registry.upsert(first)).status, 'created');
-			const conflict = await registry.upsert(second);
+			assert.strictEqual((await registry.insert(first)).status, 'created');
+			const conflict = await registry.insert(second);
 			assert.strictEqual(conflict.status, 'conflict');
 			const dupe = await registry.get('dupe');
 			assert.deepStrictEqual([registry.list().length, dupe?.baseUrl], [1, 'https://a.example.com']);
@@ -223,41 +223,41 @@ suite('Registration flows', () => {
 		const { registry, dir } = await createTempRegistry();
 		try {
 			const tokens = new SecretTokenStore(new FakeSecretStorage());
-		const updatedText = readFixture('petstore30.json').replace('"version": "1.0.0"', '"version": "9.9.9"');
-		const specLoader = {
-			load: async (source: SpecSource) => {
-				if (source.kind === 'file') {
-					throw new Error(`cannot read ${source.fsPath}`);
-				}
-				return updatedText;
-			},
-		};
-		const refreshUseCase = new RefreshApisUseCase(registry, specLoader);
-		const ctx: CommandContext = {
-			registry,
-			tokens,
-			specLoader,
-			registerUseCase: new RegisterApiUseCase(registry, tokens),
-			unregisterUseCase: new UnregisterApiUseCase(registry, tokens),
-			refreshUseCase,
-			onChange: () => undefined,
-		};
+			const updatedText = readFixture('petstore30.json').replace('"version": "1.0.0"', '"version": "9.9.9"');
+			const specLoader = {
+				load: async (source: SpecSource) => {
+					if (source.kind === 'file') {
+						throw new Error(`cannot read ${source.fsPath}`);
+					}
+					return updatedText;
+				},
+			};
+			const refreshUseCase = new RefreshApisUseCase(registry, specLoader);
+			const ctx: CommandContext = {
+				registry,
+				tokens,
+				specLoader,
+				registerUseCase: new RegisterApiUseCase(registry, tokens),
+				unregisterUseCase: new UnregisterApiUseCase(registry, tokens),
+				refreshUseCase,
+				onChange: () => undefined,
+			};
 
-		const petstoreUrl = specServer.url('/petstore30.json');
-		const okReg: ApiRegistration = createRegistration(readFixture('petstore30.json'), 'ok-api', 'https://ok.example.com', {
-			kind: 'url',
-			url: petstoreUrl,
-		});
-		const deadReg: ApiRegistration = createRegistration(readFixture('petstore30.json'), 'dead-api', 'https://dead.example.com', {
-			kind: 'file',
-			fsPath: path.join(FIXTURES, 'does-not-exist.json'),
-		});
-		await registry.upsert(okReg);
-		await registry.upsert(deadReg);
+			const petstoreUrl = specServer.url('/petstore30.json');
+			const okReg: ApiRegistration = createRegistration(readFixture('petstore30.json'), 'ok-api', 'https://ok.example.com', {
+				kind: 'url',
+				url: petstoreUrl,
+			});
+			const deadReg: ApiRegistration = createRegistration(readFixture('petstore30.json'), 'dead-api', 'https://dead.example.com', {
+				kind: 'file',
+				fsPath: path.join(FIXTURES, 'does-not-exist.json'),
+			});
+			await registry.insert(okReg);
+			await registry.insert(deadReg);
 
-		const failures = await refreshAll(ctx);
+			const failures = await refreshAll(ctx);
 
-		assert.deepStrictEqual(failures.map((f) => f.split(':')[0]), ['dead-api']);
+			assert.deepStrictEqual(failures.map((f) => f.split(':')[0]), ['dead-api']);
 			assert.strictEqual((await registry.get('dead-api'))?.snapshot.model.info.version, '1.0.0');
 			assert.strictEqual((await registry.get('ok-api'))?.snapshot.model.info.version, '9.9.9');
 		} finally {

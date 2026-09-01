@@ -272,6 +272,24 @@ export interface ApiIndexEntry {
 }
 
 /**
+ * API identifiers are used as filenames (`<apiId>.json` in `globalStorage`).
+ * They must be filename-safe to avoid sanitization collisions.
+ */
+export const API_ID_PATTERN = /^[a-zA-Z0-9._-]+$/;
+
+/** Human-readable message shown when {@link API_ID_PATTERN} fails. */
+export const API_ID_VALIDATION_MESSAGE =
+	'Identifier may only contain letters, numbers, dot (.), underscore (_), and hyphen (-).';
+
+/**
+ * Returns `true` when `apiId` is non-empty, filename-safe, and not a
+ * reserved directory entry (`.` / `..`).
+ */
+export function isValidApiId(apiId: string): boolean {
+	return apiId.length > 0 && apiId.length <= 128 && API_ID_PATTERN.test(apiId) && apiId !== '.' && apiId !== '..';
+}
+
+/**
  * A user-registered API: metadata, invocation base URL, spec source, and the
  * last-good snapshot used by all discovery and invocation tools.
  */
