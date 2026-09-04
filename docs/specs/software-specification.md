@@ -11,8 +11,8 @@ timestamp: "2026-09-04T00:00:00Z"
 related:
   - "[Repository Docs](../index.md)"
 resource:
-  - "package.json"
-  - "src/extension.ts"
+  - "../../package.json"
+  - "../../src/extension.ts"
 ---
 
 # Software Specification: OpenAPI Gateway for Chat
