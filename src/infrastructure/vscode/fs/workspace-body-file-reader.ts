@@ -4,6 +4,14 @@ import { RequestBuildError } from '../../../domain';
 import { BodyFileReader, FileDescriptor } from '../../../domain/ports/body-file-reader';
 
 /**
+ * Returns true for http/https schemes, case-insensitively.
+ */
+function isHttpScheme(llmPath: string): boolean {
+	const lower = llmPath.toLowerCase();
+	return lower.startsWith('http://') || lower.startsWith('https://');
+}
+
+/**
  * Returns true if the given error is a VS Code FileSystemError with the specified code.
  */
 function isFileSystemErrorWithCode(err: unknown, code: string): boolean {
@@ -25,7 +33,7 @@ export class WorkspaceBodyFileReader implements BodyFileReader {
 	 * Throws {@link RequestBuildError} if the path is an unsupported scheme (e.g., http/https).
 	 */
 	private resolveInternal(llmPath: string): vscode.Uri {
-		if (llmPath.startsWith('http://') || llmPath.startsWith('https://')) {
+		if (isHttpScheme(llmPath)) {
 			throw new RequestBuildError(`Only local files are supported for bodyFile, got: "${llmPath}"`);
 		}
 		if (llmPath.startsWith('file://')) {
@@ -74,9 +82,6 @@ export class WorkspaceBodyFileReader implements BodyFileReader {
 	 */
 	async read(llmPath: string): Promise<Uint8Array> {
 		const uri = this.resolveInternal(llmPath);
-		if (llmPath.startsWith('http://') || llmPath.startsWith('https://')) {
-			throw new RequestBuildError(`Only local files are supported for bodyFile, got: "${llmPath}"`);
-		}
 		try {
 			return await vscode.workspace.fs.readFile(uri);
 		} catch (err) {

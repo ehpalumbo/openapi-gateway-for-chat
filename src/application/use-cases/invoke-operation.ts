@@ -120,7 +120,9 @@ export class InvokeOperationUseCase {
 	}
 
 	/**
-	 * Builds and executes the request for an operation invocation (R-INV-1..5).
+	 * Builds, resolves the body bytes, and executes the request (R-INV-1..5).
+	 * File bodies are resolved here (not in the HTTP client) so read failures
+	 * surface as `build` errors before any network traffic.
 	 */
 	async execute(
 		registration: ApiRegistration,
@@ -137,7 +139,17 @@ export class InvokeOperationUseCase {
 			throw error;
 		}
 
-		const { url, method, headers, body } = built;
+		let body: string | Uint8Array | undefined;
+		try {
+			body = await resolveRequestBody(built.body);
+		} catch (error) {
+			if (error instanceof RequestBuildError) {
+				return { kind: 'build', error: error.message };
+			}
+			throw error;
+		}
+
+		const { url, method, headers } = built;
 		const token = await this.tokenStore.getToken(registration.apiId);
 		if (token !== undefined) {
 			headers.Authorization = `Bearer ${token}`;
@@ -164,6 +176,20 @@ export class InvokeOperationUseCase {
 	}
 }
 
+/**
+ * Resolves the request body, which may be a string, bytes, or a function returning either.
+ * If the body is a function, it is invoked and awaited to get the actual body content.
+ */
+async function resolveRequestBody(body: BuiltRequest['body']): Promise<string | Uint8Array | undefined> {
+	if (typeof body === 'function') {
+		return await body();
+	}
+	return body;
+}
+
+/**
+ * Converts a raw HTTP response to a classified {@link HttpResponsePayload}.
+ */
 function toPayload(url: string, response: RawHttpResponse): HttpResponsePayload {
 	const body = classifyBody(response.headers, response.body);
 	return {
@@ -176,6 +202,10 @@ function toPayload(url: string, response: RawHttpResponse): HttpResponsePayload 
 	};
 }
 
+/**
+ * Classifies the response body based on content type and returns a structured representation.
+ * If the body is empty, returns undefined.
+ */
 function classifyBody(headers: Record<string, string>, bytes: Uint8Array): ResponseBodyContent | undefined {
 	if (bytes.length === 0) {
 		return undefined;
@@ -193,6 +223,10 @@ function classifyBody(headers: Record<string, string>, bytes: Uint8Array): Respo
 
 const BODY_PREVIEW_LIMIT = 600;
 
+/**
+ * Returns a preview of the body string, truncated if it exceeds the limit.
+ * If the body is undefined or null, returns undefined.
+ */
 function previewBody(body: string): string | undefined {
 	if (body === undefined || body === null) {
 		return undefined;

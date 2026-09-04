@@ -1,24 +1,16 @@
 import { HttpClient, HttpRequest, RawHttpResponse } from '../../../application';
-import { BodySupplier } from '../../../domain';
 
 /**
  * Fetch-based implementation of the {@link HttpClient} port.
+ * The request body is already resolved by the use-case (string or bytes).
  */
 export class FetchHttpClient implements HttpClient {
 	async send(request: HttpRequest): Promise<RawHttpResponse> {
 		const signal = request.timeoutMs ? AbortSignal.timeout(request.timeoutMs) : undefined;
-		let fetchBody: string | Uint8Array | undefined;
-		if (typeof request.body === 'function') {
-			fetchBody = await (request.body as BodySupplier)();
-		} else if (typeof request.body === 'string') {
-			fetchBody = request.body;
-		} else if (request.body instanceof Uint8Array) {
-			fetchBody = request.body;
-		}
 		const response = await fetch(request.url, {
 			method: request.method,
 			headers: request.headers,
-			body: fetchBody,
+			body: request.body,
 			signal,
 		});
 

@@ -8,7 +8,7 @@ import {
 	RawHttpResponse,
 	TokenStore,
 } from '../../application';
-import { ApiRegistration, BodyFileReader, BodySupplier, FileDescriptor, OperationInfo, RequestBuilder, RequestBuildError } from '../../domain';
+import { ApiRegistration, BodyFileReader, FileDescriptor, OperationInfo, RequestBuilder, RequestBuildError } from '../../domain';
 
 function registration(baseUrl = 'https://api.example.com/v1'): ApiRegistration {
 	return {
@@ -138,9 +138,7 @@ class FakeHttpClientWithSupplier implements HttpClient {
 	public receivedBytes?: Uint8Array;
 	async send(request: HttpRequest): Promise<RawHttpResponse> {
 		this.lastRequest = request;
-		if (typeof request.body === 'function') {
-			this.receivedBytes = await (request.body as BodySupplier)();
-		} else if (request.body instanceof Uint8Array) {
+		if (request.body instanceof Uint8Array) {
 			this.receivedBytes = request.body;
 		} else if (typeof request.body === 'string') {
 			this.receivedBytes = new TextEncoder().encode(request.body);
@@ -375,7 +373,8 @@ suite('InvokeOperationUseCase with bodyFile', () => {
 		})([registration()]);
 		const useCase = new InvokeOperationUseCase(registry, new FakeTokenStore(), new FakeHttpClient(), builder);
 		const safe = await useCase.prepareInvocation({ apiId: 'petshop', operationId: 'getPet', bodyFile: 'data.json' });
-		assert.strictEqual(safe.kind, 'skip_confirmation');
+		assert.strictEqual(safe.kind, 'invalid_invocation');
+		assert.match((safe as { error: string }).error, /must not include a request body/i);
 		const nonSafe = await useCase.prepareInvocation({ apiId: 'petshop', operationId: 'createPet', bodyFile: 'data.json' });
 		assert.strictEqual(nonSafe.kind, 'needs_confirmation');
 	});
@@ -440,6 +439,51 @@ suite('InvokeOperationUseCase with bodyFile', () => {
 		assert.strictEqual(result.kind, 'build');
 		assert.match((result as { error: string }).error, /Body file not found/);
 		assert.strictEqual(client.receivedBytes, undefined);
+	});
+
+	test('TOCTOU read failure at send time maps to build, not network', async () => {
+		const reader = new FakeBodyFileReader(10, new TextEncoder().encode('stale'));
+		const builder = new RequestBuilder(reader);
+		// Simulate deletion between stat() and read(): stat succeeds, read throws.
+		reader.read = async (llmPath: string): Promise<Uint8Array> => {
+			throw new RequestBuildError(`Body file not found or not accessible: "${llmPath}": deleted after stat`);
+		};
+		const client = new FakeHttpClientWithSupplier();
+		// FakeHttpClientWithSupplier resolves the supplier itself, like FetchHttpClient.
+		const useCase = new InvokeOperationUseCase(new FakeRegistry(), new FakeTokenStore(), client, builder);
+		const op = createPostOperation();
+		const result = await useCase.execute(registration(), op, { apiId: 'petshop', operationId: 'createPet', bodyFile: 'data.json' });
+		assert.strictEqual(result.kind, 'build');
+		assert.match((result as { error: string }).error, /Body file not found/);
+	});
+
+	test('GET with inline body or bodyFile yields build error', async () => {
+		const reader = new FakeBodyFileReader(5);
+		const builder = new RequestBuilder(reader);
+		const client = new FakeHttpClientWithSupplier();
+		const useCase = new InvokeOperationUseCase(new FakeRegistry(), new FakeTokenStore(), client, builder);
+		const getOp: OperationInfo = { ...createPostOperation(), method: 'get', operationId: 'getPet', requestBody: undefined };
+		const inline = await useCase.execute(registration(), getOp, { apiId: 'petshop', operationId: 'getPet', body: { a: 1 } });
+		assert.strictEqual(inline.kind, 'build');
+		assert.match((inline as { error: string }).error, /must not include a request body/i);
+		const viaFile = await useCase.execute(registration(), getOp, { apiId: 'petshop', operationId: 'getPet', bodyFile: 'data.json' });
+		assert.strictEqual(viaFile.kind, 'build');
+		assert.match((viaFile as { error: string }).error, /must not include a request body/i);
+		assert.strictEqual(client.receivedBytes, undefined);
+	});
+
+	test('empty-string required body counts as missing', async () => {
+		const reader = new FakeBodyFileReader(5);
+		const builder = new RequestBuilder(reader);
+		const client = new FakeHttpClientWithSupplier();
+		const useCase = new InvokeOperationUseCase(new FakeRegistry(), new FakeTokenStore(), client, builder);
+		const op = createPostOperation();
+		const inline = await useCase.execute(registration(), op, { apiId: 'petshop', operationId: 'createPet', body: '' });
+		assert.strictEqual(inline.kind, 'build');
+		assert.match((inline as { error: string }).error, /Missing required request body/i);
+		const viaFile = await useCase.execute(registration(), op, { apiId: 'petshop', operationId: 'createPet', bodyFile: '' });
+		assert.strictEqual(viaFile.kind, 'build');
+		assert.match((viaFile as { error: string }).error, /Missing required request body/i);
 	});
 });
 

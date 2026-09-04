@@ -87,7 +87,7 @@ export class RequestBuilder {
 		this.validateBodyInputs(op, input);
 		this.applyContentType(headers, op, input);
 
-		if (hasValue(input.bodyFile)) {
+		if (isFilled(input.bodyFile)) {
 			return this.buildFileRequest(op, url, headers, input.bodyFile);
 		}
 		return this.buildInlineRequest(op, url, headers, input.body);
@@ -115,23 +115,40 @@ export class RequestBuilder {
 	 */
 	private validateBodyInputs(op: OperationInfo, input: InvokeInput): void {
 		this.assertBodyExclusivity(input);
+		this.assertNoBodyOnSafeMethod(op, input);
 		this.assertRequiredBody(op, input);
 	}
 
 	/**
 	 * Throws {@link RequestBuildError} if both `body` and `bodyFile` are provided.
+	 * An empty-string `bodyFile` counts as absent so it never triggers exclusivity.
 	 */
 	private assertBodyExclusivity(input: InvokeInput): void {
-		if (hasValue(input.body) && hasValue(input.bodyFile)) {
+		if (hasValue(input.body) && isFilled(input.bodyFile)) {
 			throw new RequestBuildError('Provide either "body" or "bodyFile", not both.');
 		}
 	}
 
 	/**
+	 * Throws {@link RequestBuildError} if a body is supplied for a safe method
+	 * (`GET`/`HEAD`): `fetch` rejects such requests, so fail fast with a build error.
+	 */
+	private assertNoBodyOnSafeMethod(op: OperationInfo, input: InvokeInput): void {
+		const method = op.method.toUpperCase();
+		if ((method === 'GET' || method === 'HEAD') && (hasValue(input.body) || isFilled(input.bodyFile))) {
+			throw new RequestBuildError(
+				`Operation "${op.operationId}" uses ${method}, which must not include a request body. ` +
+				`Remove "body"/"bodyFile" or choose a different operation.`
+			);
+		}
+	}
+
+	/**
 	 * Throws {@link RequestBuildError} if a required request body is missing.
+	 * Empty strings count as missing (matches `isFilled` path-param semantics).
 	 */
 	private assertRequiredBody(op: OperationInfo, input: InvokeInput): void {
-		if (op.requestBody?.required && !hasValue(input.body) && !hasValue(input.bodyFile)) {
+		if (op.requestBody?.required && !isFilled(input.body) && !isFilled(input.bodyFile)) {
 			throw new RequestBuildError(
 				`Missing required request body. Provide a non-empty value for the request body of operation ` +
 				`"${op.operationId}" (${op.method.toUpperCase()} ${op.pathTemplate}).`
@@ -149,7 +166,7 @@ export class RequestBuilder {
 		input: InvokeInput,
 	): void {
 		const hasBody = hasValue(input.body);
-		const hasBodyFile = hasValue(input.bodyFile);
+		const hasBodyFile = isFilled(input.bodyFile);
 		const needsContentType = hasBody || hasBodyFile;
 		if (!needsContentType || hasHeader('Content-Type', headers)) {
 			return;
@@ -389,7 +406,7 @@ function hasValue(value: unknown): value is NonNullable<unknown> {
 }
 
 /** A required path parameter counts as provided only with a non-empty value. */
-function isFilled(value: unknown): boolean {
+function isFilled(value: unknown): value is NonNullable<unknown> {
 	return hasValue(value) && !(typeof value === 'string' && value.length === 0);
 }
 

@@ -466,4 +466,45 @@ suite('Request builder with bodyFile', () => {
 		const reqText = await builder.build(registration('https://api.example.com'), opNoContent, { body: 'hello' });
 		assert.strictEqual(reqText.headers['Content-Type'], 'text/plain');
 	});
+
+	test('GET/HEAD with body or bodyFile throws', async () => {
+		const reader = new FakeBodyFileReader({ 'data.json': { size: 5 } });
+		const builder = new RequestBuilder(reader);
+		const getOp = postOperation({ method: 'get', operationId: 'getPet' });
+		await assert.rejects(
+			() => builder.build(registration('https://api.example.com'), getOp, { body: { a: 1 } }),
+			(err: unknown) => {
+				assert.ok(err instanceof RequestBuildError);
+				assert.match((err as Error).message, /must not include a request body/i);
+				return true;
+			}
+		);
+		await assert.rejects(
+			() => builder.build(registration('https://api.example.com'), getOp, { bodyFile: 'data.json' }),
+			RequestBuildError
+		);
+		const headOp = postOperation({ method: 'head', operationId: 'headPet' });
+		await assert.rejects(
+			() => builder.build(registration('https://api.example.com'), headOp, { bodyFile: 'data.json' }),
+			RequestBuildError
+		);
+	});
+
+	test('empty-string required body counts as missing', async () => {
+		const op = postOperation({ requestBody: { required: true, content: { 'application/json': {} } } });
+		const reader = new FakeBodyFileReader({ 'data.json': { size: 5 } });
+		const builder = new RequestBuilder(reader);
+		await assert.rejects(
+			() => builder.build(registration('https://api.example.com'), op, { body: '' }),
+			(err: unknown) => {
+				assert.ok(err instanceof RequestBuildError);
+				assert.match((err as Error).message, /Missing required request body/);
+				return true;
+			}
+		);
+		await assert.rejects(
+			() => builder.build(registration('https://api.example.com'), op, { bodyFile: '' }),
+			RequestBuildError
+		);
+	});
 });
