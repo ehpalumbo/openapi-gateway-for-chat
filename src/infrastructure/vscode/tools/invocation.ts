@@ -45,7 +45,9 @@ function renderPreparedConfirmation(descriptor: ConfirmationDescriptor): vscode.
 		descriptor.hasToken ? '- Authorization: Bearer ***' : undefined,
 	].filter((line): line is string => line !== undefined);
 
-	if (descriptor.bodyPreview !== undefined) {
+	if (descriptor.bodyFile !== undefined) {
+		lines.push('', 'Body:', `File: ${descriptor.bodyFile} (${descriptor.bodySize ?? 0} bytes)`);
+	} else if (descriptor.bodyPreview !== undefined) {
 		lines.push('', 'Body:', '```json', descriptor.bodyPreview, '```');
 	}
 

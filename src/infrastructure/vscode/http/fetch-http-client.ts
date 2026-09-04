@@ -2,6 +2,7 @@ import { HttpClient, HttpRequest, RawHttpResponse } from '../../../application';
 
 /**
  * Fetch-based implementation of the {@link HttpClient} port.
+ * The request body is already resolved by the use-case (string or bytes).
  */
 export class FetchHttpClient implements HttpClient {
 	async send(request: HttpRequest): Promise<RawHttpResponse> {

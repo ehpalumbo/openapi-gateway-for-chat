@@ -4,9 +4,10 @@
  * The base URL is strictly the registration's `baseUrl` (R-INV-4): input can
  * only fill path templates, query strings, headers, and the JSON body, all of
  * which are encoded so no value can change the request target's origin.
- * `buildRequest` orchestrates the per-concern helpers below; each helper owns
+ * `RequestBuilder` orchestrates the per-concern helpers below; each helper owns
  * one validation or serialization rule so failures point at a single cause.
  */
+import { BodyFileReader } from './ports/body-file-reader';
 import { ApiRegistration, OperationInfo } from './types';
 
 /** Scalar value accepted for path placeholders; always stringified and URL-encoded. */
@@ -31,7 +32,15 @@ export interface InvokeInput {
 	headers?: Record<string, HeaderValue>;
 	/** Request body: JSON object/array (preferred) or raw string sent verbatim. */
 	body?: Record<string, unknown> | unknown[] | string;
+	/**
+	 * Local file path or file:// URI whose bytes are sent as request body;
+	 * alternative to 'body'; do not set both; no body validation when using file.
+	 */
+	bodyFile?: string;
 }
+
+/** Lazy supplier for file-backed request bodies (bytes, binary-capable). */
+export type BodySupplier = () => Promise<Uint8Array>;
 
 /**
  * A fully built HTTP request ready for execution.
@@ -43,12 +52,16 @@ export interface BuiltRequest {
 	url: string;
 	/** Header names in original case; values stringified. */
 	headers: Record<string, string>;
-	/** JSON-serialized body, present only when the caller supplied one. */
-	body?: string;
+	/** Body: serialized string for inline, supplier for file, undefined when none. */
+	body?: string | BodySupplier;
+	/** Unified size: inline via Buffer.byteLength, file via stat.size. */
+	bodySize?: number;
+	/** Original LLM file path when file path used. */
+	bodyFile?: string;
 }
 
 /**
- * Validation failure raised by {@link buildRequest}, with a message written
+ * Validation failure raised by {@link RequestBuilder}, with a message written
  * for model retry reasoning (R-INV-3, R-INV-5).
  */
 export class RequestBuildError extends Error { }
@@ -56,39 +69,169 @@ export class RequestBuildError extends Error { }
 /** Headers an agent may never set: they would redirect or spoof the target. */
 const FORBIDDEN_HEADERS = new Set(['host', 'authorization', 'content-length']);
 
-/**
- * Builds the concrete HTTP request for one operation invocation.
- *
- * @param reg - Registration whose `baseUrl` is the sole request target.
- * @param op - Operation being invoked.
- * @param input - Agent-supplied parameter and body values.
- * @throws {@link RequestBuildError} when required path parameters are missing
- *         or forbidden headers are attempted.
- */
-export function buildRequest(reg: ApiRegistration, op: OperationInfo, input: InvokeInput): BuiltRequest {
-	const base = reg.baseUrl.replace(/\/+$/, '');
-	const pathParams = requirePathParams(op, record(input.pathParams));
-	const url = buildTargetUrl(base, op.pathTemplate, pathParams, record(input.queryParams));
-	const headers = collectHeaders(op, base, record(input.headers));
-	if (op.requestBody && op.requestBody.required && !input.body) {
-		throw new RequestBuildError(
-			`Missing required request body. Provide a non-empty value for the request body of operation ` +
-			`"${op.operationId}" (${op.method.toUpperCase()} ${op.pathTemplate}).`
-		);
+export class RequestBuilder {
+	constructor(private readonly reader: BodyFileReader) { }
+
+	/**
+	 * Builds the concrete HTTP request for one operation invocation.
+	 *
+	 * @param reg - Registration whose `baseUrl` is the sole request target.
+	 * @param op - Operation being invoked.
+	 * @param input - Agent-supplied parameter and body values.
+	 * @throws {@link RequestBuildError} when validation fails.
+	 */
+	async build(reg: ApiRegistration, op: OperationInfo, input: InvokeInput): Promise<BuiltRequest> {
+		const url = this.buildUrl(reg, op, input);
+		const headers = this.buildHeaders(reg, op, input);
+
+		this.validateBodyInputs(op, input);
+		this.applyContentType(headers, op, input);
+
+		if (isFilled(input.bodyFile)) {
+			return this.buildFileRequest(op, url, headers, input.bodyFile);
+		}
+		return this.buildInlineRequest(op, url, headers, input.body);
 	}
-	if (hasValue(input.body) && !hasHeader('Content-Type', headers)) {
-		const contentType = resolveContentType(input.body, op);
-		if (contentType) {
-			headers['Content-Type'] = contentType;
+
+	/**
+	 * Constructs the absolute URL for the request, substituting path and query values.
+	 */
+	private buildUrl(reg: ApiRegistration, op: OperationInfo, input: InvokeInput): URL {
+		const base = reg.baseUrl.replace(/\/+$/, '');
+		const pathParams = requirePathParams(op, record(input.pathParams));
+		return buildTargetUrl(base, op.pathTemplate, pathParams, record(input.queryParams));
+	}
+
+	/**
+	 * Merges spec-declared header parameters with user-supplied headers, rejecting
+	 * reserved ones that would redirect or spoof the target (R-INV-4).
+	 */
+	private buildHeaders(reg: ApiRegistration, op: OperationInfo, input: InvokeInput): Record<string, string> {
+		return collectHeaders(op, reg.baseUrl, record(input.headers));
+	}
+
+	/** 
+	 * Validates body inputs: exclusivity of `body` vs `bodyFile`, and required body presence (R-INV-5). 
+	 */
+	private validateBodyInputs(op: OperationInfo, input: InvokeInput): void {
+		this.assertBodyExclusivity(input);
+		this.assertNoBodyOnSafeMethod(op, input);
+		this.assertRequiredBody(op, input);
+	}
+
+	/**
+	 * Throws {@link RequestBuildError} if both `body` and `bodyFile` are provided.
+	 * An empty-string `bodyFile` counts as absent so it never triggers exclusivity.
+	 */
+	private assertBodyExclusivity(input: InvokeInput): void {
+		if (hasValue(input.body) && isFilled(input.bodyFile)) {
+			throw new RequestBuildError('Provide either "body" or "bodyFile", not both.');
 		}
 	}
-	const body = serializeBody(input.body);
-	return {
-		method: op.method.toUpperCase(),
-		url: url.toString(),
-		headers,
-		...(body !== undefined ? { body } : {}),
-	};
+
+	/**
+	 * Throws {@link RequestBuildError} if a body is supplied for a safe method
+	 * (`GET`/`HEAD`): `fetch` rejects such requests, so fail fast with a build error.
+	 */
+	private assertNoBodyOnSafeMethod(op: OperationInfo, input: InvokeInput): void {
+		const method = op.method.toUpperCase();
+		if ((method === 'GET' || method === 'HEAD') && (hasValue(input.body) || isFilled(input.bodyFile))) {
+			throw new RequestBuildError(
+				`Operation "${op.operationId}" uses ${method}, which must not include a request body. ` +
+				`Remove "body"/"bodyFile" or choose a different operation.`
+			);
+		}
+	}
+
+	/**
+	 * Throws {@link RequestBuildError} if a required request body is missing.
+	 * Empty strings count as missing (matches `isFilled` path-param semantics).
+	 */
+	private assertRequiredBody(op: OperationInfo, input: InvokeInput): void {
+		if (op.requestBody?.required && !isFilled(input.body) && !isFilled(input.bodyFile)) {
+			throw new RequestBuildError(
+				`Missing required request body. Provide a non-empty value for the request body of operation ` +
+				`"${op.operationId}" (${op.method.toUpperCase()} ${op.pathTemplate}).`
+			);
+		}
+	}
+
+	/**
+	 * Applies Content-Type when a body is present and no explicit header exists.
+	 * Precedence: explicit header > spec declared first key > file extension / inline inference > fallback.
+	 */
+	private applyContentType(
+		headers: Record<string, string>,
+		op: OperationInfo,
+		input: InvokeInput,
+	): void {
+		const hasBody = hasValue(input.body);
+		const hasBodyFile = isFilled(input.bodyFile);
+		const needsContentType = hasBody || hasBodyFile;
+		if (!needsContentType || hasHeader('Content-Type', headers)) {
+			return;
+		}
+		const declared = this.getDeclaredContentType(op);
+		if (declared) {
+			headers['Content-Type'] = declared;
+			return;
+		}
+		if (hasBodyFile) {
+			headers['Content-Type'] = inferFromExtension(input.bodyFile!);
+			return;
+		}
+		if (hasBody) {
+			headers['Content-Type'] = resolveContentType(input.body as Record<string, unknown> | unknown[] | string, op) ?? 'application/octet-stream';
+		}
+	}
+
+	/**
+	 * Returns the first declared content type in the spec, or undefined if none.
+	 */
+	private getDeclaredContentType(op: OperationInfo): string | undefined {
+		return op.requestBody?.content ? Object.keys(op.requestBody.content)[0] : undefined;
+	}
+
+	/**
+	 * Builds a request with a file-backed body, using the {@link BodyFileReader} to stat and read.
+	 */
+	private async buildFileRequest(
+		op: OperationInfo,
+		url: URL,
+		headers: Record<string, string>,
+		bodyFile: string,
+	): Promise<BuiltRequest> {
+		const fd = await this.reader.stat(bodyFile);
+		const body: BodySupplier = () => this.reader.read(bodyFile);
+		return {
+			method: op.method.toUpperCase(),
+			url: url.toString(),
+			headers,
+			body,
+			bodySize: fd.size,
+			bodyFile,
+		};
+	}
+
+	/**
+	 * Builds a request with an inline body, serializing JSON or sending strings verbatim.
+	 */
+	private buildInlineRequest(
+		op: OperationInfo,
+		url: URL,
+		headers: Record<string, string>,
+		body: InvokeInput['body'],
+	): BuiltRequest {
+		const serialized = serializeBody(body);
+		const bodySize = serialized !== undefined ? Buffer.byteLength(serialized, 'utf8') : undefined;
+		return {
+			method: op.method.toUpperCase(),
+			url: url.toString(),
+			headers,
+			...(serialized !== undefined ? { body: serialized } : {}),
+			...(bodySize !== undefined ? { bodySize } : {}),
+		};
+	}
 }
 
 /**
@@ -219,6 +362,41 @@ function resolveContentType(
 	return 'application/json';
 }
 
+/**
+ * Infers a MIME type from the file extension of a path or file:// URI.
+ * Returns 'application/octet-stream' when no extension is present or recognized.
+ */
+function inferFromExtension(filePath: string): string {
+	// Strip file:// prefix if present for extension detection.
+	let normalized = filePath;
+	if (normalized.startsWith('file://')) {
+		try {
+			normalized = decodeURIComponent(new URL(normalized).pathname);
+		} catch {
+			normalized = normalized.replace(/^file:\/\//, '');
+		}
+	}
+	const lastSlash = normalized.lastIndexOf('/');
+	const lastDot = normalized.lastIndexOf('.');
+	if (lastDot === -1 || lastDot < lastSlash) {
+		return 'application/octet-stream';
+	}
+	const ext = normalized.slice(lastDot + 1).toLowerCase();
+	switch (ext) {
+		case 'json':
+			return 'application/json';
+		case 'txt':
+			return 'text/plain';
+		case 'xml':
+			return 'application/xml';
+		case 'html':
+		case 'htm':
+			return 'text/html';
+		default:
+			return 'application/octet-stream';
+	}
+}
+
 function record<T>(value: Record<string, T> | undefined): Record<string, T> {
 	return typeof value === 'object' && value !== null ? (value as Record<string, T>) : {} as Record<string, T>;
 }
@@ -228,7 +406,7 @@ function hasValue(value: unknown): value is NonNullable<unknown> {
 }
 
 /** A required path parameter counts as provided only with a non-empty value. */
-function isFilled(value: unknown): boolean {
+function isFilled(value: unknown): value is NonNullable<unknown> {
 	return hasValue(value) && !(typeof value === 'string' && value.length === 0);
 }
 

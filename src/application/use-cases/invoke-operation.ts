@@ -1,9 +1,10 @@
 import {
 	ApiRegistration,
-	buildRequest,
+	BuiltRequest,
 	isSupportedImageContentType,
 	isTextContentType,
 	OperationInfo,
+	RequestBuilder,
 	RequestBuildError,
 } from '../../domain';
 import { InvokeOperationInput } from '../dtos/invoke-input';
@@ -58,6 +59,8 @@ export interface ConfirmationDescriptor {
 	url: string;
 	hasToken: boolean;
 	bodyPreview?: string;
+	bodyFile?: string;
+	bodySize?: number;
 }
 
 export type PrepareInvocationResult =
@@ -71,6 +74,7 @@ export class InvokeOperationUseCase {
 		private readonly registry: ApiRegistry,
 		private readonly tokenStore: TokenStore,
 		private readonly httpClient: HttpClient,
+		private readonly requestBuilder: RequestBuilder,
 	) { }
 
 	/**
@@ -83,18 +87,21 @@ export class InvokeOperationUseCase {
 			return { kind: 'not_found' };
 		}
 
-		if (SAFE_METHODS.has(operation.method.toUpperCase())) {
-			return { kind: 'skip_confirmation' };
+		let built: BuiltRequest;
+		try {
+			built = await this.requestBuilder.build(entry.registration, operation, input);
+		} catch (error) {
+			if (error instanceof RequestBuildError) {
+				return {
+					kind: 'invalid_invocation',
+					error: error instanceof Error ? error.message : String(error),
+				};
+			}
+			throw error;
 		}
 
-		let url: string;
-		try {
-			url = buildRequest(entry.registration, operation, input).url;
-		} catch (error) {
-			return {
-				kind: 'invalid_invocation',
-				error: error instanceof Error ? error.message : String(error),
-			};
+		if (SAFE_METHODS.has(built.method)) {
+			return { kind: 'skip_confirmation' };
 		}
 
 		const token = await this.tokenStore.getToken(entry.registration.apiId);
@@ -102,25 +109,29 @@ export class InvokeOperationUseCase {
 			kind: 'needs_confirmation',
 			descriptor: {
 				title: `Invoke ${entry.registration.title} — ${operation.operationId}`,
-				method: operation.method.toUpperCase(),
-				url,
+				method: built.method,
+				url: built.url,
 				hasToken: token !== undefined,
-				bodyPreview: previewBody(input.body),
+				bodyPreview: typeof built.body === 'string' ? previewBody(built.body) : undefined,
+				bodyFile: built.bodyFile,
+				bodySize: built.bodySize,
 			},
 		};
 	}
 
 	/**
-	 * Builds and executes the request for an operation invocation (R-INV-1..5).
+	 * Builds, resolves the body bytes, and executes the request (R-INV-1..5).
+	 * File bodies are resolved here (not in the HTTP client) so read failures
+	 * surface as `build` errors before any network traffic.
 	 */
 	async execute(
 		registration: ApiRegistration,
 		operation: OperationInfo,
 		input: InvokeOperationInput
 	): Promise<OperationExecutionResult> {
-		let builtRequest: ReturnType<typeof buildRequest>;
+		let built: BuiltRequest;
 		try {
-			builtRequest = buildRequest(registration, operation, input);
+			built = await this.requestBuilder.build(registration, operation, input);
 		} catch (error) {
 			if (error instanceof RequestBuildError) {
 				return { kind: 'build', error: error.message };
@@ -128,7 +139,17 @@ export class InvokeOperationUseCase {
 			throw error;
 		}
 
-		const { url, method, headers, body } = builtRequest;
+		let body: string | Uint8Array | undefined;
+		try {
+			body = await resolveRequestBody(built.body);
+		} catch (error) {
+			if (error instanceof RequestBuildError) {
+				return { kind: 'build', error: error.message };
+			}
+			throw error;
+		}
+
+		const { url, method, headers } = built;
 		const token = await this.tokenStore.getToken(registration.apiId);
 		if (token !== undefined) {
 			headers.Authorization = `Bearer ${token}`;
@@ -155,6 +176,20 @@ export class InvokeOperationUseCase {
 	}
 }
 
+/**
+ * Resolves the request body, which may be a string, bytes, or a function returning either.
+ * If the body is a function, it is invoked and awaited to get the actual body content.
+ */
+async function resolveRequestBody(body: BuiltRequest['body']): Promise<string | Uint8Array | undefined> {
+	if (typeof body === 'function') {
+		return await body();
+	}
+	return body;
+}
+
+/**
+ * Converts a raw HTTP response to a classified {@link HttpResponsePayload}.
+ */
 function toPayload(url: string, response: RawHttpResponse): HttpResponsePayload {
 	const body = classifyBody(response.headers, response.body);
 	return {
@@ -167,6 +202,10 @@ function toPayload(url: string, response: RawHttpResponse): HttpResponsePayload 
 	};
 }
 
+/**
+ * Classifies the response body based on content type and returns a structured representation.
+ * If the body is empty, returns undefined.
+ */
 function classifyBody(headers: Record<string, string>, bytes: Uint8Array): ResponseBodyContent | undefined {
 	if (bytes.length === 0) {
 		return undefined;
@@ -184,13 +223,30 @@ function classifyBody(headers: Record<string, string>, bytes: Uint8Array): Respo
 
 const BODY_PREVIEW_LIMIT = 600;
 
-function previewBody(body: unknown): string | undefined {
+/**
+ * Returns a preview of the body string, truncated if it exceeds the limit.
+ * If the body is undefined or null, returns undefined.
+ */
+function previewBody(body: string): string | undefined {
 	if (body === undefined || body === null) {
 		return undefined;
 	}
 	let serialized: string;
 	try {
-		serialized = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
+		const trimmed = body.trim();
+		if (
+			(trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+			(trimmed.startsWith('[') && trimmed.endsWith(']'))
+		) {
+			try {
+				const parsed = JSON.parse(trimmed);
+				serialized = JSON.stringify(parsed, null, 2);
+			} catch {
+				serialized = body;
+			}
+		} else {
+			serialized = body;
+		}
 	} catch {
 		serialized = String(body);
 	}

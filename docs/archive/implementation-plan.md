@@ -20,6 +20,8 @@ related:
 # Implementation Plan: OpenAPI Gateway for Chat — MVP
 
 > **ARCHIVED (2026-08-27):** v0 implementation plan for the first shippable release, which has landed. Superseded by the shipped implementation and the [Software Specification](../specs/software-specification.md); retained as historical context for the build-out decisions and phase structure.
+>
+> **Path note:** `src/` paths cited here and in the linked phase records predate the onion-architecture migration — `src/core` is now `src/domain`, and `src/store` / `src/vscode` are now `src/infrastructure` (see the [Onion Architecture Migration Plan](../onion-architecture-plan.md)). Treat them as historical references.
 
 ## Metadata
 

@@ -5,13 +5,14 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DiscoveryUseCases, InvokeOperationUseCase, TokenStore } from '../application';
-import { ApiRegistration, buildApiModel, parseSpec } from '../domain';
+import { ApiRegistration, buildApiModel, parseSpec, RequestBuilder } from '../domain';
 import {
 	createInvokeOperationTool,
 	FetchHttpClient,
 	FileBackedApiRegistry,
 	registerGatewayTools,
 	ToolContext,
+	WorkspaceBodyFileReader,
 	WorkspaceSpillStore,
 } from '../infrastructure';
 
@@ -41,6 +42,7 @@ interface RecordedRequest {
 	url: string;
 	headers: http.IncomingHttpHeaders;
 	body: string;
+	bodyBytes: Uint8Array;
 }
 
 function readFixture(name: string): string {
@@ -160,18 +162,36 @@ suite('Invocation flow', () => {
 	let server: http.Server;
 	let baseUrl: string;
 	let requests: RecordedRequest[];
+	let tmpWorkspaceDir: string;
 
 	suiteSetup(async () => {
 		requests = [];
+		// Temporary workspace folder for relative bodyFile resolution (WorkspaceBodyFileReader uses workspaceFolders[0])
+		tmpWorkspaceDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openapi-gateway-workspace-'));
+		// Stub workspaceFolders to point at tmpWorkspaceDir if no folder is open
+		try {
+			const current = vscode.workspace.workspaceFolders;
+			if (!current || current.length === 0) {
+				Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+					value: [{ uri: vscode.Uri.file(tmpWorkspaceDir), name: 'test', index: 0 }],
+					writable: true,
+					configurable: true,
+				});
+			}
+		} catch {
+			// ignore stub failure – relative tests will fallback to file:// handling
+		}
 		server = http.createServer((req, res) => {
 			const chunks: Buffer[] = [];
 			req.on('data', (chunk: Buffer) => chunks.push(chunk));
 			req.on('end', () => {
+				const raw = Buffer.concat(chunks);
 				requests.push({
 					method: req.method ?? '',
 					url: req.url ?? '',
 					headers: req.headers,
-					body: Buffer.concat(chunks).toString('utf8'),
+					body: raw.toString('utf8'),
+					bodyBytes: new Uint8Array(raw),
 				});
 				if (req.url === '/boom') {
 					res.writeHead(500, { 'content-type': 'text/plain' });
@@ -244,7 +264,9 @@ suite('Invocation flow', () => {
 		spills = new WorkspaceSpillStore(vscode.Uri.file(storageRoot));
 
 		const discoveryUseCases = new DiscoveryUseCases(registry);
-		const invokeUseCase = new InvokeOperationUseCase(registry, tokens, new FetchHttpClient());
+		const bodyFileReader = new WorkspaceBodyFileReader();
+		const requestBuilder = new RequestBuilder(bodyFileReader);
+		const invokeUseCase = new InvokeOperationUseCase(registry, tokens, new FetchHttpClient(), requestBuilder);
 		toolContext = { registry, tokens, spills, discoveryUseCases, invokeUseCase };
 		registerGatewayTools(toolContext);
 	});
@@ -259,6 +281,9 @@ suite('Invocation flow', () => {
 			// storageRoot cleanup already via spills, but ensure registry spills dir removed
 			const storageRoot = path.dirname(spillDir);
 			await fs.promises.rm(storageRoot, { recursive: true, force: true }).catch(() => undefined);
+		}
+		if (tmpWorkspaceDir) {
+			await fs.promises.rm(tmpWorkspaceDir, { recursive: true, force: true }).catch(() => undefined);
 		}
 	});
 
@@ -447,5 +472,135 @@ suite('Invocation flow', () => {
 		await spills.cleanup();
 
 		assert.ok(!fs.existsSync(spillDir) || fs.readdirSync(spillDir).length === 0, 'no spill files may remain');
+	});
+
+	test('gateway_invoke_operation with bodyFile relative path sends file bytes verbatim', async () => {
+		const payload = JSON.stringify({ name: 'RelativeRex', kind: 'relative' });
+		const fileName = 'relative-payload.json';
+		const fileUri = vscode.Uri.joinPath(vscode.Uri.file(tmpWorkspaceDir), fileName);
+		await vscode.workspace.fs.writeFile(fileUri, Buffer.from(payload, 'utf8'));
+		const before = requests.length;
+		const result = await vscode.lm.invokeTool(
+			'gateway_invoke_operation',
+			{ input: { apiId: 'echo', operationId: 'createPet', bodyFile: fileName }, toolInvocationToken: undefined },
+			new vscode.CancellationTokenSource().token
+		);
+		assert.ok(result.content[0] instanceof vscode.LanguageModelTextPart);
+		assert.strictEqual(requests.length, before + 1);
+		const seen = requests[requests.length - 1];
+		assert.strictEqual(seen.method, 'POST');
+		assert.strictEqual(seen.url, '/pets');
+		assert.strictEqual(seen.body, payload);
+		assert.strictEqual(seen.headers['content-type'], 'application/json');
+		// also test via invoke helper that server echoed body
+		assert.ok(result.content[0] instanceof vscode.LanguageModelTextPart);
+	});
+
+	test('gateway_invoke_operation with bodyFile file:// URI sends file bytes verbatim', async () => {
+		const payload = 'binary-like-content-123';
+		const tmpFile = path.join(os.tmpdir(), `payload-${Date.now()}.bin`);
+		const fileUri = vscode.Uri.file(tmpFile);
+		await vscode.workspace.fs.writeFile(fileUri, Buffer.from(payload, 'utf8'));
+		const fileUrl = fileUri.toString(); // file:///...
+		const before = requests.length;
+		const result = await vscode.lm.invokeTool(
+			'gateway_invoke_operation',
+			{ input: { apiId: 'echo', operationId: 'createPet', bodyFile: fileUrl }, toolInvocationToken: undefined },
+			new vscode.CancellationTokenSource().token
+		);
+		assert.ok(result.content[0] instanceof vscode.LanguageModelTextPart);
+		assert.strictEqual(requests.length, before + 1);
+		const seen = requests[requests.length - 1];
+		assert.strictEqual(seen.body, payload);
+		// spec declares application/json, so header should be application/json (first key overrides extension)
+		assert.strictEqual(seen.headers['content-type'], 'application/json');
+		try { await vscode.workspace.fs.delete(fileUri); } catch { /* ignore */ }
+	});
+
+	test('gateway_invoke_operation with bodyFile binary PNG sends bytes verbatim', async () => {
+		const png = LOGO_PNG;
+		const fileName = 'logo-test.png';
+		const fileUri = vscode.Uri.joinPath(vscode.Uri.file(tmpWorkspaceDir), fileName);
+		await vscode.workspace.fs.writeFile(fileUri, Buffer.from(png));
+		const before = requests.length;
+		const result = await vscode.lm.invokeTool(
+			'gateway_invoke_operation',
+			{ input: { apiId: 'echo', operationId: 'createPet', bodyFile: fileName }, toolInvocationToken: undefined },
+			new vscode.CancellationTokenSource().token
+		);
+		assert.ok(result.content[0] instanceof vscode.LanguageModelTextPart);
+		assert.strictEqual(requests.length, before + 1);
+		const seen = requests[requests.length - 1];
+		assert.deepStrictEqual(Array.from(seen.bodyBytes), Array.from(png));
+	});
+
+	test('gateway_invoke_operation with missing bodyFile returns structured error without network', async () => {
+		const before = requests.length;
+		const result = await vscode.lm.invokeTool(
+			'gateway_invoke_operation',
+			{ input: { apiId: 'echo', operationId: 'createPet', bodyFile: 'does-not-exist-12345.json' }, toolInvocationToken: undefined },
+			new vscode.CancellationTokenSource().token
+		);
+		assert.strictEqual(result.content.length, 1);
+		assert.ok(result.content[0] instanceof vscode.LanguageModelTextPart);
+		const payload = JSON.parse((result.content[0] as vscode.LanguageModelTextPart).value) as { error?: string };
+		assert.match(payload.error ?? '', /Body file not found/i);
+		assert.match(payload.error ?? '', /does-not-exist-12345/);
+		assert.strictEqual(requests.length, before, 'no request should reach server');
+	});
+
+	test('gateway_invoke_operation with both body and bodyFile returns structured error', async () => {
+		const fileName = 'both-bodies.json';
+		const fileUri = vscode.Uri.joinPath(vscode.Uri.file(tmpWorkspaceDir), fileName);
+		await vscode.workspace.fs.writeFile(fileUri, Buffer.from('{"name":"File"}', 'utf8'));
+		const before = requests.length;
+		const result = await vscode.lm.invokeTool(
+			'gateway_invoke_operation',
+			{ input: { apiId: 'echo', operationId: 'createPet', body: { name: 'Inline' }, bodyFile: fileName }, toolInvocationToken: undefined },
+			new vscode.CancellationTokenSource().token
+		);
+		assert.strictEqual(result.content.length, 1);
+		assert.ok(result.content[0] instanceof vscode.LanguageModelTextPart);
+		const payload = JSON.parse((result.content[0] as vscode.LanguageModelTextPart).value) as { error?: string };
+		assert.match(payload.error ?? '', /Provide either/);
+		assert.strictEqual(requests.length, before);
+	});
+
+	test('prepareInvocation for file body shows File preview with size not content', async () => {
+		const payload = JSON.stringify({ name: 'PreviewRex' });
+		const fileName = 'preview-payload.json';
+		const fileUri = vscode.Uri.joinPath(vscode.Uri.file(tmpWorkspaceDir), fileName);
+		await vscode.workspace.fs.writeFile(fileUri, Buffer.from(payload, 'utf8'));
+		const stat = await vscode.workspace.fs.stat(fileUri);
+		const invokeTool = createInvokeOperationTool(toolContext);
+		await tokens.setToken('echo', TOKEN);
+		const prepared = await invokeTool.prepareInvocation!(
+			{ input: { apiId: 'echo', operationId: 'createPet', bodyFile: fileName } },
+			new vscode.CancellationTokenSource().token
+		);
+		assert.ok(prepared?.confirmationMessages, 'file POST must require confirmation');
+		const message = String((prepared.confirmationMessages as { message: { value: string } }).message.value);
+		assert.match(message, new RegExp(`File: ${fileName} \\(${stat.size} bytes\\)`));
+		assert.ok(!message.includes(payload), 'confirmation must not leak file content');
+		assert.ok(!message.includes('PreviewRex'));
+		assert.match(message, /Authorization: Bearer \*\*\*/);
+	});
+
+	test('prepareInvocation for large file still shows size only', async () => {
+		const large = 'a'.repeat(700);
+		const fileName = 'large-payload.txt';
+		const fileUri = vscode.Uri.joinPath(vscode.Uri.file(tmpWorkspaceDir), fileName);
+		await vscode.workspace.fs.writeFile(fileUri, Buffer.from(large, 'utf8'));
+		const stat = await vscode.workspace.fs.stat(fileUri);
+		assert.ok(stat.size > 600, 'precondition: file larger than BODY_PREVIEW_LIMIT');
+		const invokeTool = createInvokeOperationTool(toolContext);
+		const prepared = await invokeTool.prepareInvocation!(
+			{ input: { apiId: 'echo', operationId: 'createPet', bodyFile: fileName } },
+			new vscode.CancellationTokenSource().token
+		);
+		assert.ok(prepared?.confirmationMessages);
+		const message = String((prepared.confirmationMessages as { message: { value: string } }).message.value);
+		assert.match(message, new RegExp(`File: ${fileName} \\(${stat.size} bytes\\)`));
+		assert.ok(!message.includes(large.slice(0, 100)), 'large file content must not appear in preview');
 	});
 });

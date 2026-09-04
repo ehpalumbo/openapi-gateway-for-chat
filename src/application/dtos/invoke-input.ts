@@ -10,4 +10,5 @@ export interface InvokeOperationInput {
 	queryParams?: Record<string, QueryParamValue>;
 	headers?: Record<string, HeaderValue>;
 	body?: Record<string, unknown> | unknown[] | string;
+	bodyFile?: string;
 }

@@ -7,12 +7,12 @@ tags:
   - "vscode-extension"
   - "language-model-tools"
   - "openapi"
-timestamp: "2026-08-23T00:00:00Z"
+timestamp: "2026-09-04T00:00:00Z"
 related:
   - "[Repository Docs](../index.md)"
 resource:
-  - "package.json"
-  - "src/extension.ts"
+  - "../../package.json"
+  - "../../src/extension.ts"
 ---
 
 # Software Specification: OpenAPI Gateway for Chat
@@ -112,10 +112,12 @@ Flow: **`list_apis` → `describe_api` → `list_operations` → `describe_opera
 | ID | Requirement |
 | ---- | ------------- |
 | R-INV-1 | A single tool `invoke_operation` executes an operation against a registered API. |
-| R-INV-2 | Structured input schema: `{ apiId, operationId, pathParams?, queryParams?, headers?, body? }`. The agent fills values based on `describe_operation` output. |
+| R-INV-2 | Structured input schema: `{ apiId, operationId, pathParams?, queryParams?, headers?, body?, bodyFile? }`. The agent fills values based on `describe_operation` output. `body` carries an inline JSON value or raw string; `bodyFile` carries a local file path or `file://` URI (absolute or workspace-relative) whose bytes become the request body. The two are mutually exclusive. |
 | R-INV-3 | Path parameters marked required in the spec are enforced: invocation fails fast with an actionable message if they are missing. |
 | R-INV-4 | Requests are built strictly from the spec's server/base URL; the tool does not accept arbitrary URLs. |
 | R-INV-5 | Errors (network failures, non-2xx responses, validation errors) are returned as structured, descriptive tool results — formatted so the model can reason about retry or correction. |
+| R-INV-6 | File-backed bodies keep large or binary payloads out of model context: `bodyFile` bytes are sent verbatim with no body-schema validation, `Content-Type` is resolved per R-INV-7, and only local files are accepted — remote `http(s)` references are rejected. A missing or inaccessible file surfaces as a build error before any network traffic. |
+| R-INV-7 | Request-body validation and `Content-Type` resolution are centralized in the injectable request builder behind a file-reader port (domain stays free of filesystem access): `body` and `bodyFile` are mutually exclusive, bodies are rejected on safe methods (`GET`/`HEAD`), and a required spec body must be satisfied by one of the two. `Content-Type` precedence is explicit header, then the spec's first declared content key, then file-extension or inline inference, falling back to `application/octet-stream`. |
 
 ### 3.7 Safety: Destructive Call Confirmation
 
@@ -125,7 +127,7 @@ Confirmation is implemented via the Language Model Tools API's native mechanism:
 | ---- | ------------- |
 | R-SAFE-1 | Safe methods (`GET`, `HEAD`) execute without confirmation: `prepareInvocation` returns no `confirmationMessages` for `invoke_operation` calls resolving to safe methods. |
 | R-SAFE-2 | Non-safe methods (`POST`, `PUT`, `PATCH`, `DELETE`, and any others) require user approval before each call: `prepareInvocation` returns `confirmationMessages` for such calls, causing the host to prompt before every invocation. |
-| R-SAFE-3 | The confirmation message content is rich and model/user-readable: HTTP method, resolved URL, headers to be sent (with the Authorization header redacted), and a body preview. |
+| R-SAFE-3 | The confirmation message content is rich and model/user-readable: HTTP method, resolved URL, headers to be sent (with the Authorization header redacted), and a body preview. Inline bodies show a truncated pretty-printed preview; file-backed bodies show only a size descriptor (`File: <path> (<size> bytes)`) resolved via a stat check without reading file content. |
 
 ### 3.8 Response Handling
 
@@ -180,7 +182,8 @@ Reference input schemas (informative; normative shape defined by implementation)
   "pathParams": { "<name>": "string" },
   "queryParams": { "<name>": "string|number|boolean|array" },
   "headers": { "<name>": "string" },
-  "body": "any — validated against the operation's request-body schema"
+  "body": "any — validated against the operation's request-body schema",
+  "bodyFile": "string — local file path or file:// URI (absolute or workspace-relative), alternative to body"
 }
 ```
 
