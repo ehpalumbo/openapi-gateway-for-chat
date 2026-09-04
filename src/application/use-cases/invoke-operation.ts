@@ -1,9 +1,10 @@
 import {
 	ApiRegistration,
-	buildRequest,
+	BuiltRequest,
 	isSupportedImageContentType,
 	isTextContentType,
 	OperationInfo,
+	RequestBuilder,
 	RequestBuildError,
 } from '../../domain';
 import { InvokeOperationInput } from '../dtos/invoke-input';
@@ -58,6 +59,8 @@ export interface ConfirmationDescriptor {
 	url: string;
 	hasToken: boolean;
 	bodyPreview?: string;
+	bodyFile?: string;
+	bodySize?: number;
 }
 
 export type PrepareInvocationResult =
@@ -71,6 +74,7 @@ export class InvokeOperationUseCase {
 		private readonly registry: ApiRegistry,
 		private readonly tokenStore: TokenStore,
 		private readonly httpClient: HttpClient,
+		private readonly requestBuilder: RequestBuilder,
 	) { }
 
 	/**
@@ -83,18 +87,21 @@ export class InvokeOperationUseCase {
 			return { kind: 'not_found' };
 		}
 
-		if (SAFE_METHODS.has(operation.method.toUpperCase())) {
-			return { kind: 'skip_confirmation' };
+		let built: BuiltRequest;
+		try {
+			built = await this.requestBuilder.build(entry.registration, operation, input);
+		} catch (error) {
+			if (error instanceof RequestBuildError) {
+				return {
+					kind: 'invalid_invocation',
+					error: error instanceof Error ? error.message : String(error),
+				};
+			}
+			throw error;
 		}
 
-		let url: string;
-		try {
-			url = buildRequest(entry.registration, operation, input).url;
-		} catch (error) {
-			return {
-				kind: 'invalid_invocation',
-				error: error instanceof Error ? error.message : String(error),
-			};
+		if (SAFE_METHODS.has(built.method)) {
+			return { kind: 'skip_confirmation' };
 		}
 
 		const token = await this.tokenStore.getToken(entry.registration.apiId);
@@ -102,10 +109,12 @@ export class InvokeOperationUseCase {
 			kind: 'needs_confirmation',
 			descriptor: {
 				title: `Invoke ${entry.registration.title} — ${operation.operationId}`,
-				method: operation.method.toUpperCase(),
-				url,
+				method: built.method,
+				url: built.url,
 				hasToken: token !== undefined,
-				bodyPreview: previewBody(input.body),
+				bodyPreview: typeof built.body === 'string' ? previewBody(built.body) : undefined,
+				bodyFile: built.bodyFile,
+				bodySize: built.bodySize,
 			},
 		};
 	}
@@ -118,9 +127,9 @@ export class InvokeOperationUseCase {
 		operation: OperationInfo,
 		input: InvokeOperationInput
 	): Promise<OperationExecutionResult> {
-		let builtRequest: ReturnType<typeof buildRequest>;
+		let built: BuiltRequest;
 		try {
-			builtRequest = buildRequest(registration, operation, input);
+			built = await this.requestBuilder.build(registration, operation, input);
 		} catch (error) {
 			if (error instanceof RequestBuildError) {
 				return { kind: 'build', error: error.message };
@@ -128,7 +137,7 @@ export class InvokeOperationUseCase {
 			throw error;
 		}
 
-		const { url, method, headers, body } = builtRequest;
+		const { url, method, headers, body } = built;
 		const token = await this.tokenStore.getToken(registration.apiId);
 		if (token !== undefined) {
 			headers.Authorization = `Bearer ${token}`;
@@ -184,13 +193,26 @@ function classifyBody(headers: Record<string, string>, bytes: Uint8Array): Respo
 
 const BODY_PREVIEW_LIMIT = 600;
 
-function previewBody(body: unknown): string | undefined {
+function previewBody(body: string): string | undefined {
 	if (body === undefined || body === null) {
 		return undefined;
 	}
 	let serialized: string;
 	try {
-		serialized = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
+		const trimmed = body.trim();
+		if (
+			(trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+			(trimmed.startsWith('[') && trimmed.endsWith(']'))
+		) {
+			try {
+				const parsed = JSON.parse(trimmed);
+				serialized = JSON.stringify(parsed, null, 2);
+			} catch {
+				serialized = body;
+			}
+		} else {
+			serialized = body;
+		}
 	} catch {
 		serialized = String(body);
 	}

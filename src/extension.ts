@@ -7,6 +7,7 @@ import {
 	SpillStore,
 	UnregisterApiUseCase,
 } from './application';
+import { RequestBuilder } from './domain';
 import {
 	CommandContext,
 	FetchHttpClient,
@@ -17,6 +18,7 @@ import {
 	registerGatewayTools,
 	SecretTokenStore,
 	ToolContext,
+	WorkspaceBodyFileReader,
 	WorkspaceSpillStore,
 } from './infrastructure';
 
@@ -33,13 +35,15 @@ export function activate({ globalState, secrets, storageUri, globalStorageUri, s
 	spillStore = new WorkspaceSpillStore(storageUri ?? globalStorageUri);
 	const httpClient = new FetchHttpClient();
 	const specLoader = new FetchSpecLoader();
+	const bodyFileReader = new WorkspaceBodyFileReader();
+	const requestBuilder = new RequestBuilder(bodyFileReader);
 
 	// 2. Application Use Cases
 	const registerUseCase = new RegisterApiUseCase(registry, tokens);
 	const unregisterUseCase = new UnregisterApiUseCase(registry, tokens);
 	const refreshUseCase = new RefreshApisUseCase(registry, specLoader);
 	const discoveryUseCases = new DiscoveryUseCases(registry);
-	const invokeUseCase = new InvokeOperationUseCase(registry, tokens, httpClient);
+	const invokeUseCase = new InvokeOperationUseCase(registry, tokens, httpClient, requestBuilder);
 
 	// 3. Presentation / Framework Adapters (Tools & Commands)
 	const toolContext: ToolContext = {

@@ -176,7 +176,11 @@
                 "array",
                 "string"
               ],
-              "description": "Request body. Pass JSON bodies as object or array. Strings are sent verbatim for raw text. Sent only when the operation declares a request body. MUST be object/array for JSON; DO NOT stringify or pass JSON as a string."
+              "description": "Request body. Pass JSON bodies as object or array. Strings are sent verbatim for raw text. Sent only when the operation declares a request body. MUST be object/array for JSON; DO NOT stringify or pass JSON as a string. Alternative to 'bodyFile'; do not set both."
+            },
+            "bodyFile": {
+              "type": "string",
+              "description": "Local file path or file:// URI whose bytes are sent as request body. Absolute or workspace-relative. Alternative to 'body'; do not set both. No body validation when using file. Prefer explicit Content-Type header."
             }
           },
           "required": [

@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DiscoveryUseCases, InvokeOperationUseCase, TokenStore } from '../application';
-import { ApiRegistration, buildApiModel, parseSpec } from '../domain';
+import { ApiRegistration, buildApiModel, parseSpec, RequestBuilder, RequestBuildError } from '../domain';
 import {
 	createDescribeApiTool,
 	createDescribeOperationTool,
@@ -104,7 +104,11 @@ suite('Discovery flow', () => {
 		registryStorageDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openapi-gateway-registry-'));
 		registry = new FileBackedApiRegistry(new FakeMemento(), vscode.Uri.file(registryStorageDir));
 		const discoveryUseCases = new DiscoveryUseCases(registry);
-		const invokeUseCase = new InvokeOperationUseCase(registry, noTokens, new FetchHttpClient());
+		const noopReader = {
+			async stat(llmPath: string) { throw new RequestBuildError(`unexpected stat for "${llmPath}"`); },
+			async read(llmPath: string) { throw new RequestBuildError(`unexpected read for "${llmPath}"`); },
+		};
+		const invokeUseCase = new InvokeOperationUseCase(registry, noTokens, new FetchHttpClient(), new RequestBuilder(noopReader));
 		context = { registry, tokens: noTokens, spills: noSpills, discoveryUseCases, invokeUseCase };
 		listApisTool = createListApisTool(context);
 		describeApiTool = createDescribeApiTool(context);

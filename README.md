@@ -17,8 +17,8 @@ The extension is therefore a **convenience layer**: no external processes, no ex
 
 - **Register APIs** from a URL or workspace file (OpenAPI 3.0.x / 3.1.x), persisted globally across workspaces.
 - **Progressive disclosure discovery tools**: `gateway_list_apis` → `gateway_describe_api` → `gateway_list_api_operations` → `gateway_describe_api_operation`.
-- **Invocation tool**: `gateway_invoke_operation` with structured tool input validation against the spec.
-- **Safe by default**: non-safe HTTP methods require explicit user confirmation before each call, with redacted headers and a body preview.
+- **Invocation tool**: `gateway_invoke_operation` with structured tool input validation against the spec; supports `body` (inline) or `bodyFile` (local file path/`file://` URI, absolute or workspace-relative) for request bodies, with size-aware handling and `Content-Type` inference.
+- **Safe by default**: non-safe HTTP methods require explicit user confirmation before each call, with redacted headers and a body preview (`Body:` + pretty-printed JSON or `File: <path> (<size> bytes)` for `bodyFile`).
 - **Static Bearer-token auth**, stored securely in VS Code SecretStorage.
 - **Uniform response serving**: every HTTP response arrives as a plain-text metadata part (raw HTTP head: bare status line, headers, blank line) that is always present, plus — only when there is a body — a body part routed by content type (skips the body part for empty `204`/`404` etc.).
 
@@ -52,7 +52,7 @@ Agents see five tools (names as contributed):
 | `gateway_describe_api` | Show one API's metadata and operation groups. |
 | `gateway_list_api_operations` | List operations within a group. |
 | `gateway_describe_api_operation` | Show one operation's parameters, request body schema, and usage examples. |
-| `gateway_invoke_operation` | Execute an operation against the registered base URL. |
+| `gateway_invoke_operation` | Execute an operation against the registered base URL. Accepts `body` (inline JSON/string) or `bodyFile` (local file path or `file://` URI, absolute or workspace-relative, mutually exclusive with `body`); `bodyFile` bytes are sent verbatim, `Content-Type` inferred from spec, explicit header, or file extension (`.json`, `.txt`, `.xml`, `.html` → specific types, else `application/octet-stream`). |
 
 ## How responses are served
 

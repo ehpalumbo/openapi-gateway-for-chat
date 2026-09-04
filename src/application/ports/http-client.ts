@@ -1,3 +1,5 @@
+import { BodySupplier } from '../../domain';
+
 /**
  * Request payload given to the HTTP client port.
  */
@@ -5,7 +7,7 @@ export interface HttpRequest {
 	method: string;
 	url: string;
 	headers: Record<string, string>;
-	body?: string;
+	body?: string | BodySupplier | Uint8Array;
 	timeoutMs?: number;
 }
 
