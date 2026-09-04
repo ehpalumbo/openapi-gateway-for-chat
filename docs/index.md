@@ -6,7 +6,7 @@
 
 High-level project specifications defining goals, scope, functional and non-functional requirements for the extension.
 
-- [Software Specification](specs/software-specification.md) - Initial requirement set covering API registration (OpenAPI 3.0/3.1), Bearer-token auth, operation ID derivation rules, tag-based grouping, the four progressive-disclosure discovery tools plus invocation tool, confirmation safety flow, and size-aware response handling.
+- [Software Specification](specs/software-specification.md) - Initial requirement set covering API registration (OpenAPI 3.0/3.1), Bearer-token auth, operation ID derivation rules, tag-based grouping, the four progressive-disclosure discovery tools plus invocation tool with inline or file-backed (`bodyFile`) bodies, confirmation safety flow with size-only file previews, and size-aware response handling.
 - [Onion Architecture Migration Plan](onion-architecture-plan.md) - Architecture design and plan migrating the extension to Domain, Application (Use Cases & Ports), and Infrastructure layers.
 
 ## Archive
